@@ -1,3 +1,4 @@
+libgtk-3-0
 libnss3
 libxss1
 libatk-bridge2.0-0
