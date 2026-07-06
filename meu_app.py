@@ -5,17 +5,20 @@ from streamlit_folium import st_folium
 import requests
 import io
 import base64
+import os
+import tempfile
 
 # Importação do GPS
 from streamlit_geolocation import streamlit_geolocation
 
 # Importações do Playwright para os prints
-import os
-import tempfile
 from playwright.sync_api import sync_playwright
 
-# === CORREÇÃO DO PLAYWRIGHT NO CURSOR ===
-os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.join(os.environ["USERPROFILE"], "AppData", "Local", "ms-playwright")
+# === CORREÇÃO DO PLAYWRIGHT (NUVEM E LOCAL) ===
+if "USERPROFILE" in os.environ:
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.join(os.environ["USERPROFILE"], "AppData", "Local", "ms-playwright")
+else:
+    os.system("playwright install chromium")
 
 # Importações GIS e CAD
 import numpy as np
@@ -69,23 +72,29 @@ def limpar_dados_formulario():
 # ==========================================
 # FUNÇÕES DE EXPORTAÇÃO
 # ==========================================
-def gerar_txt_dados(ccs, nome, tel, md, trafo, obs, lat_c, lon_c, lat_t, lon_t, postes):
-    str_postes = "Não Informado"
-    if postes:
-         str_postes = ", ".join([p['texto'] for p in postes])
-         
-    telefone_str = tel if str(tel).strip() else "Não Informado"
+def gerar_txt_dados(ccs, nome, telefone, codigo, num_trafo, obs, lat_c, lon_c, lat_t, lon_t, marcadores_extras):
+    texto = f"({ccs} - {nome})\n\n"
     
-    conteudo = f"{ccs} - {nome}\n\n"
-    conteudo += f"TEL: {telefone_str}\n"
-    conteudo += f"MD: {md}\n"
-    conteudo += f"TRAFO: {trafo}\n"
-    conteudo += f"POSTE/ESTRUTURA: {str_postes}\n\n"
-    conteudo += f"{obs}\n\n"
-    conteudo += f"CLIENTE:\nhttps://www.google.com.br/maps/place/{lat_c},{lon_c}\n\n"
-    conteudo += f"TRAFO:\nhttps://www.google.com.br/maps/place/{lat_t},{lon_t}\n"
+    texto += f"TEL: {telefone if str(telefone).strip() else 'Não Informado'}\n"
+    texto += f"MD: {codigo if str(codigo).strip() else 'Não Informado'}\n"
+    texto += f"TRAFO: {num_trafo if str(num_trafo).strip() else 'Não Informado'}\n"
     
-    return conteudo.encode('utf-8')
+    if marcadores_extras:
+        postes_str = [m['texto'] for m in marcadores_extras]
+        texto += f"POSTE/ESTRUTURA: {', '.join(postes_str)}\n\n"
+    else:
+        texto += "POSTE/ESTRUTURA: Não Informado\n\n"
+        
+    obs_str = obs if str(obs).strip() else "Sem observações."
+    texto += f"{obs_str}\n\n"
+    
+    texto += "CLIENTE:\n"
+    texto += f"https://www.google.com.br/maps/place/{lat_c},{lon_c}\n\n"
+    
+    texto += "TRAFO:\n"
+    texto += f"https://www.google.com.br/maps/place/{lat_t},{lon_t}\n"
+    
+    return texto.encode('utf-8')
 
 def gerar_dxf(pontos_rota, coord_trafo, coord_cliente, postes_extras):
     doc = ezdxf.new('R2010')
@@ -156,7 +165,6 @@ st.set_page_config(layout="wide", page_title="NIP - GERADOR DE CROQUIS")
 
 st.markdown("""
     <style>
-    /* Trava a coluna do mapa no topo e permite que ela deslize suavemente */
     div[data-testid="column"]:nth-of-type(1) {
         position: -webkit-sticky;
         position: sticky;
@@ -164,12 +172,9 @@ st.markdown("""
         align-self: flex-start;
         z-index: 999;
     }
-    
-    /* Estilização das Abas */
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
     .stTabs [data-baseweb="tab"] { font-weight: bold; background-color: #1e1e1e; border-radius: 4px 4px 0px 0px; padding: 10px 20px; }
     .stTabs [aria-selected="true"] { background-color: #007bff; color: white !important; }
-    
     .stButton button, .stDownloadButton button { width: 100%; font-weight: bold; border-radius: 4px; border: 1px solid white; margin-bottom: 5px; }
     .stTextArea textarea { height: 90px !important; }
     .btn-verde button { background-color: #28a745 !important; color: white !important; }
@@ -228,14 +233,11 @@ if st.session_state.modo_edicao_rota:
             st.session_state.pontos_rota_atual = caminho
             st.session_state.ultimo_clique = novo_ponto
 
+# Estrutura de Colunas Iniciais
 coluna_mapa, coluna_painel = st.columns([3, 1.2])
 
-# ==========================================
-# PAINEL DIREITO (MODERNO E SEPARADO EM ABAS)
-# ==========================================
 with coluna_painel:
     st.markdown("### ⚙️ NIP - GERADOR DE CROQUIS")
-    
     aba_dados, aba_campo, aba_exportar = st.tabs(["🏢 DADOS GERAIS", "📍 TRABALHO DE CAMPO", "💾 EXPORTAR"])
     
     # ------------------------------------------
@@ -398,76 +400,6 @@ with coluna_painel:
                 st.session_state.print_mapa = None
             st.markdown('</div>', unsafe_allow_html=True)
 
-    # ------------------------------------------
-    # ABA 3: EXPORTAÇÃO E NAVEGAÇÃO
-    # ------------------------------------------
-    with aba_exportar:
-        campos_obrigatorios = [lat_c, lon_c, lat_t, lon_t]
-        todos_preenchidos = all([str(campo).strip() != "" for campo in campos_obrigatorios])
-        
-        st.markdown("##### 💾 Exportar Projeto")
-        col_exp1, col_exp2 = st.columns(2)
-        with col_exp1:
-            st.markdown('<div class="btn-azul">', unsafe_allow_html=True)
-            st.download_button(label="🌐 MAPA HTML", data="<html></html>", file_name="croqui_rede.html", mime="text/html", disabled=not todos_preenchidos, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-        with col_exp2:
-            dxf_data = gerar_dxf(st.session_state.pontos_rota_atual, [fl_lat_t, fl_lon_t], [fl_lat_c, fl_lon_c], st.session_state.marcadores_extras)
-            st.markdown('<div class="btn-roxo">', unsafe_allow_html=True)
-            st.download_button(label="📐 CAD (.dxf)", data=dxf_data, file_name=f"projeto.dxf", mime="application/dxf", disabled=not todos_preenchidos, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-        geojson_data = gerar_geojson(st.session_state.pontos_rota_atual, [fl_lat_t, fl_lon_t], [fl_lat_c, fl_lon_c], st.session_state.marcadores_extras)
-        st.markdown('<div class="btn-verde">', unsafe_allow_html=True)
-        st.download_button(label="🌍 GIS (GeoJSON)", data=geojson_data, file_name=f"rede.geojson", mime="application/geo+json", disabled=not todos_preenchidos, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.markdown("##### 📸 Print Alta Resolução")
-        st.markdown('<div class="btn-laranja">', unsafe_allow_html=True)
-        if st.button("📸 GERAR IMAGEM (.png)", use_container_width=True, disabled=not todos_preenchidos):
-            with st.spinner("Preparando a câmera do navegador..."):
-                try:
-                    mapa_para_foto = construir_mapa_camadas(is_print=True)
-                    img_bytes = gerar_print_mapa(mapa_para_foto.get_root().render())
-                    st.session_state.print_mapa = img_bytes
-                    st.success("Imagem gerada! Baixe o print e os dados abaixo.")
-                except Exception as e:
-                    st.error(f"Erro ao gerar imagem: {e}")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        if st.session_state.print_mapa:
-            col_print1, col_print2 = st.columns(2)
-            
-            with col_print1:
-                st.markdown('<div class="btn-azul">', unsafe_allow_html=True)
-                st.download_button(label="📥 BAIXAR PRINT", data=st.session_state.print_mapa, file_name=f"print_rede.png", mime="image/png", use_container_width=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-            with col_print2:
-                txt_data = gerar_txt_dados(ccs, nome, telefone, codigo, num_trafo, obs, fl_lat_c, fl_lon_c, fl_lat_t, fl_lon_t, st.session_state.marcadores_extras)
-                st.markdown('<div class="btn-verde">', unsafe_allow_html=True)
-                st.download_button(label="📄 BAIXAR DADOS (TXT)", data=txt_data, file_name=f"DADOS_CROQUI.txt", mime="text/plain", use_container_width=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-        st.markdown("<hr style='margin: 15px 0;'>", unsafe_allow_html=True)
-        st.markdown("##### 🚗 Roteamento Automático")
-        col_nav1, col_nav2 = st.columns(2)
-        with col_nav1:
-            link_waze = f"https://waze.com/ul?ll={fl_lat_t},{fl_lon_t}&navigate=yes"
-            st.markdown(f'<a href="{link_waze}" target="_blank" style="text-decoration: none;"><div class="btn-azul" style="text-align:center; padding:10px; border-radius:4px; margin-bottom:5px;">🚗 WAZE (TRAFO)</div></a>', unsafe_allow_html=True)
-        with col_nav2:
-            link_maps = f"https://www.google.com/maps/dir/?api=1&destination={fl_lat_c},{fl_lon_c}"
-            st.markdown(f'<a href="{link_maps}" target="_blank" style="text-decoration: none;"><div class="btn-verde" style="text-align:center; padding:10px; border-radius:4px; margin-bottom:5px;">🗺️ MAPS (CLIENTE)</div></a>', unsafe_allow_html=True)
-            
-        st.markdown("##### 👁️ Visão de Rua")
-        if mapa_memoria and mapa_memoria.get("last_clicked"):
-            lat_clique = mapa_memoria["last_clicked"]["lat"]
-            lon_clique = mapa_memoria["last_clicked"]["lng"]
-            url_sv = f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat_clique},{lon_clique}"
-            st.markdown(f'<a href="{url_sv}" target="_blank" style="text-decoration: none;"><div style="background-color: #007bff; color: white; text-align: center; font-weight: bold; border-radius: 4px; border: 1px solid white; padding: 10px; margin-bottom: 5px;">👀 STREET VIEW DO CLIQUE</div></a>', unsafe_allow_html=True)
-        else:
-            st.info("👆 Clique no mapa para habilitar.")
-
 # ==========================================
 # MOTOR DO MAPA (COLUNA ESQUERDA)
 # ==========================================
@@ -488,7 +420,6 @@ def construir_mapa_camadas(is_print=False):
         minimap = plugins.MiniMap(toggle_display=True, position='bottomright', width=150, height=150, zoom_level_offset=-5)
         m.add_child(minimap)
     
-    # 🏠 Cliente
     if str(lat_c).strip() and str(lon_c).strip():
         folium.Marker([fl_lat_c, fl_lon_c], icon=folium.features.DivIcon(icon_size=(30,30), html='<div style="font-size: 24px;">🏠</div>')).add_to(m)
         lbl_lat_cliente = fl_lat_c + float(st.session_state.y_cli)
@@ -497,7 +428,6 @@ def construir_mapa_camadas(is_print=False):
         html_cliente = f'<div style="background-color: black; color: yellow; border: 1px solid red; padding: 4px; font-size: 8pt; font-weight: bold; text-align: center; white-space: nowrap; box-shadow: 2px 2px 5px rgba(0,0,0,0.5);">{nome}<br>MD: {codigo}{info_tel}</div>'
         folium.Marker([lbl_lat_cliente, lbl_lon_cliente], icon=folium.features.DivIcon(icon_size=(200, 50), icon_anchor=(100, 25), html=html_cliente)).add_to(m)
         
-    # ⚡ Trafo
     if str(lat_t).strip() and str(lon_t).strip():
         folium.Marker([fl_lat_t, fl_lon_t], icon=folium.features.DivIcon(icon_size=(25,25), html='<div style="font-size: 16px; background-color: #b0b0b0; border: 2px solid black; text-align: center;">⚡</div>')).add_to(m)
         lbl_lat_trafo = fl_lat_t + float(st.session_state.y_tra)
@@ -505,7 +435,6 @@ def construir_mapa_camadas(is_print=False):
         html_trafo = f'<div style="background-color: black; color: yellow; border: 1px solid red; padding: 4px; font-size: 8pt; font-weight: bold; text-align: center; white-space: nowrap; box-shadow: 2px 2px 5px rgba(0,0,0,0.5);">TRAFO: {num_trafo}</div>'
         folium.Marker([lbl_lat_trafo, lbl_lon_trafo], icon=folium.features.DivIcon(icon_size=(150, 36), icon_anchor=(75, 18), html=html_trafo)).add_to(m)
 
-    # Poste atual
     tem_poste_ao_vivo = str(lat_novo).strip() != "" and str(lon_novo).strip() != ""
     if tem_poste_ao_vivo:
         fl_lat_novo = converter_coordenada(lat_novo, m_lat_default)
@@ -516,7 +445,6 @@ def construir_mapa_camadas(is_print=False):
         html_poste = f'<div style="background-color: black; color: yellow; border: 1px solid red; padding: 4px; font-size: 8pt; font-weight: bold; text-align: center; white-space: nowrap; box-shadow: 2px 2px 5px rgba(0,0,0,0.5);">{texto_marcador}</div>'
         folium.Marker([lbl_lat_poste, lbl_lon_poste], icon=folium.features.DivIcon(icon_size=(150, 36), icon_anchor=(75, 18), html=html_poste)).add_to(m)
 
-    # Postes fixados
     for idx, marc in enumerate(st.session_state.marcadores_extras):
         m_lat, m_lon = marc["coord"]
         o_lat = float(marc.get("off_lat", 0.0002))
@@ -537,14 +465,12 @@ def construir_mapa_camadas(is_print=False):
         html_fixado = f'<div style="background-color: black; color: yellow; border: 1px solid red; padding: 4px; font-size: 8pt; font-weight: bold; text-align: center; white-space: nowrap; box-shadow: 2px 2px 5px rgba(0,0,0,0.5);">{marc["texto"]}</div>'
         folium.Marker([m_lat + o_lat, m_lon + o_lon], icon=folium.features.DivIcon(icon_size=(150, 36), icon_anchor=(75, 18), html=html_fixado)).add_to(m)
 
-    # Rota Amarela
     if st.session_state.pontos_rota_atual:
         dash = '10, 10' if st.session_state.modo_edicao_rota else None
         cor_linha = '#FFFF00' 
         folium.PolyLine(st.session_state.pontos_rota_atual, color="#000", weight=10, opacity=1).add_to(m)
         folium.PolyLine(st.session_state.pontos_rota_atual, color=cor_linha, weight=6, dash_array=dash, opacity=1).add_to(m)
 
-    # Observações no Mapa
     if str(obs).strip():
         observacoes_html = obs.replace('\n', '<br>')
         lbl_lat_obs = ((fl_lat_c + fl_lat_t) / 2) + float(st.session_state.y_obs)
@@ -557,3 +483,71 @@ def construir_mapa_camadas(is_print=False):
 with coluna_mapa:
     mapa_exibicao = construir_mapa_camadas(is_print=False)
     st_folium(mapa_exibicao, use_container_width=True, height=1000, key="mapa_principal", returned_objects=["last_clicked", "center", "zoom"])
+
+# ------------------------------------------
+# ABA 3: EXPORTAÇÃO E NAVEGAÇÃO
+# ------------------------------------------
+with aba_exportar:
+    campos_obrigatorios = [lat_c, lon_c, lat_t, lon_t]
+    todos_preenchidos = all([str(campo).strip() != "" for campo in campos_obrigatorios])
+    
+    st.markdown("##### 💾 Exportar Projeto")
+    col_exp1, col_exp2 = st.columns(2)
+    with col_exp1:
+        st.markdown('<div class="btn-azul">', unsafe_allow_html=True)
+        st.download_button(label="🌐 MAPA HTML", data="<html></html>", file_name="croqui_rede.html", mime="text/html", disabled=not todos_preenchidos, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col_exp2:
+        dxf_data = gerar_dxf(st.session_state.pontos_rota_atual, [fl_lat_t, fl_lon_t], [fl_lat_c, fl_lon_c], st.session_state.marcadores_extras)
+        st.markdown('<div class="btn-roxo">', unsafe_allow_html=True)
+        st.download_button(label="📐 CAD (.dxf)", data=dxf_data, file_name=f"projeto_{ccs}.dxf", mime="application/dxf", disabled=not todos_preenchidos, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    geojson_data = gerar_geojson(st.session_state.pontos_rota_atual, [fl_lat_t, fl_lon_t], [fl_lat_c, fl_lon_c], st.session_state.marcadores_extras)
+    st.markdown('<div class="btn-verde">', unsafe_allow_html=True)
+    st.download_button(label="🌍 GIS (GeoJSON)", data=geojson_data, file_name=f"rede_{ccs}.geojson", mime="application/geo+json", disabled=not todos_preenchidos, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown("##### 📸 Print Alta Resolução")
+    st.markdown('<div class="btn-laranja">', unsafe_allow_html=True)
+    
+    # O BOTÃO AGORA CHAMA A FUNÇÃO CORRETAMENTE POIS ELA JÁ FOI DEFINIDA ACIMA!
+    if st.button("📸 GERAR IMAGEM (.png)", use_container_width=True, disabled=not todos_preenchidos):
+        with st.spinner("Preparando a câmera do navegador..."):
+            try:
+                mapa_para_foto = construir_mapa_camadas(is_print=True)
+                img_bytes = gerar_print_mapa(mapa_para_foto.get_root().render())
+                st.session_state.print_mapa = img_bytes
+                st.success("Imagem gerada! Baixe abaixo.")
+            except Exception as e:
+                st.error(f"Erro ao gerar imagem: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    if st.session_state.print_mapa:
+        st.markdown('<div class="btn-azul">', unsafe_allow_html=True)
+        st.download_button(label="📥 BAIXAR PRINT", data=st.session_state.print_mapa, file_name=f"print_rede_{ccs}.png", mime="image/png", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        txt_data = gerar_txt_dados(ccs, nome, telefone, codigo, num_trafo, obs, lat_c, lon_c, lat_t, lon_t, st.session_state.marcadores_extras)
+        st.markdown('<div class="btn-cinza">', unsafe_allow_html=True)
+        st.download_button(label="📄 BAIXAR DADOS DO CROQUI (.txt)", data=txt_data, file_name=f"DADOS_CROQUI_{ccs}.txt", mime="text/plain", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    st.markdown("<hr style='margin: 15px 0;'>", unsafe_allow_html=True)
+    st.markdown("##### 🚗 Roteamento Automático")
+    col_nav1, col_nav2 = st.columns(2)
+    with col_nav1:
+        link_waze = f"https://waze.com/ul?ll={fl_lat_t},{fl_lon_t}&navigate=yes"
+        st.markdown(f'<a href="{link_waze}" target="_blank" style="text-decoration: none;"><div class="btn-azul" style="text-align:center; padding:10px; border-radius:4px; margin-bottom:5px;">🚗 WAZE (TRAFO)</div></a>', unsafe_allow_html=True)
+    with col_nav2:
+        link_maps = f"https://www.google.com/maps/dir/?api=1&destination={fl_lat_c},{fl_lon_c}"
+        st.markdown(f'<a href="{link_maps}" target="_blank" style="text-decoration: none;"><div class="btn-verde" style="text-align:center; padding:10px; border-radius:4px; margin-bottom:5px;">🗺️ MAPS (CLIENTE)</div></a>', unsafe_allow_html=True)
+        
+    st.markdown("##### 👁️ Visão de Rua")
+    if mapa_memoria and mapa_memoria.get("last_clicked"):
+        lat_clique = mapa_memoria["last_clicked"]["lat"]
+        lon_clique = mapa_memoria["last_clicked"]["lng"]
+        url_sv = f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat_clique},{lon_clique}"
+        st.markdown(f'<a href="{url_sv}" target="_blank" style="text-decoration: none;"><div style="background-color: #007bff; color: white; text-align: center; font-weight: bold; border-radius: 4px; border: 1px solid white; padding: 10px; margin-bottom: 5px;">👀 STREET VIEW DO CLIQUE</div></a>', unsafe_allow_html=True)
+    else:
+        st.info("👆 Clique no mapa para habilitar.")
