@@ -1,0 +1,10 @@
+streamlit
+folium
+streamlit-folium
+requests
+playwright
+numpy
+ezdxf
+geopandas
+shapely
+streamlit-geolocation
