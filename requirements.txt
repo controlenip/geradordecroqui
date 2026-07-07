@@ -2,9 +2,11 @@ streamlit
 folium
 streamlit-folium
 requests
+pandas
+openpyxl
+streamlit-geolocation
 playwright
 numpy
 ezdxf
 geopandas
 shapely
-streamlit-geolocation
