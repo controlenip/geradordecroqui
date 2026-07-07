@@ -163,7 +163,7 @@ def gerar_print_mapa(mapa_html_content):
 # ==========================================
 # CÉREBRO DA DISTRIBUIÇÃO EM LOTE
 # ==========================================
-def construir_mapa_lote_offline(lat_c, lon_c, lat_t, lon_t, nome, codigo, num_trafo, obs, font_size=8, font_style="Arial"):
+def construir_mapa_lote_offline(lat_c, lon_c, lat_t, lon_t, nome, codigo, num_trafo, obs, font_size=8, font_style="Arial", postes_extras=None):
     fl_lat_c = converter_coordenada(lat_c, -4.512536)
     fl_lon_c = converter_coordenada(lon_c, -44.469452)
     fl_lat_t = converter_coordenada(lat_t, -4.513000)
@@ -223,14 +223,22 @@ def construir_mapa_lote_offline(lat_c, lon_c, lat_t, lon_t, nome, codigo, num_tr
     card_style = f'background-color: black; color: yellow; border: 2px solid red; padding: 6px; font-size: {font_size}pt; font-family: {font_style}; font-weight: bold; text-align: center; white-space: nowrap; box-shadow: 3px 3px 6px rgba(0,0,0,0.6);'
 
     # Simbologia robusta para exportação
-    folium.Marker([fl_lat_c, fl_lon_c], icon=folium.features.DivIcon(icon_size=(30,30), icon_anchor=(15,15), html='<div style="font-size: 24px; filter: drop-shadow(2px 2px 2px white); font-family: Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif;">🏠</div>')).add_to(m)
+    folium.Marker([fl_lat_c, fl_lon_c], icon=folium.features.DivIcon(icon_size=(30,30), icon_anchor=(15,15), html='<div style="font-size: 24px; line-height: 1; display: block; filter: drop-shadow(2px 2px 2px white); font-family: Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif;">🏠</div>')).add_to(m)
     html_cliente = f'<div style="{card_style}">{nome}<br>MD: {codigo}</div>'
     folium.Marker([lbl_lat_c, lbl_lon_c], icon=folium.features.DivIcon(icon_size=(250, 60), icon_anchor=(125, 30), html=html_cliente)).add_to(m)
     
-    folium.Marker([fl_lat_t, fl_lon_t], icon=folium.features.DivIcon(icon_size=(25,25), icon_anchor=(12,12), html='<div style="font-size: 18px; background-color: #b0b0b0; border: 2px solid black; text-align: center; border-radius: 2px; filter: drop-shadow(1px 1px 1px white); font-family: Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif;">⚡</div>')).add_to(m)
+    folium.Marker([fl_lat_t, fl_lon_t], icon=folium.features.DivIcon(icon_size=(25,25), icon_anchor=(12,12), html='<div style="font-size: 18px; line-height: 1; display: block; background-color: #b0b0b0; border: 2px solid black; text-align: center; border-radius: 2px; filter: drop-shadow(1px 1px 1px white); font-family: Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif;">⚡</div>')).add_to(m)
     html_trafo = f'<div style="{card_style}">TRAFO: {num_trafo}</div>'
     folium.Marker([lbl_lat_t, lbl_lon_t], icon=folium.features.DivIcon(icon_size=(200, 40), icon_anchor=(100, 20), html=html_trafo)).add_to(m)
     
+    # Adicionar Postes/Estruturas se houver
+    if postes_extras:
+        for marc in postes_extras:
+            m_lat, m_lon = marc["coord"]
+            folium.Marker([m_lat, m_lon], icon=folium.features.DivIcon(icon_size=(22,22), icon_anchor=(11,11), html='<div style="font-size: 13px; background-color: #a9a9a9; color: black; border: 2px solid black; border-radius: 50%; width: 22px; height: 22px; line-height: 18px; text-align: center; font-weight: bold; box-shadow: 2px 2px 4px rgba(0,0,0,0.5);">P</div>')).add_to(m)
+            html_fixado = f'<div style="{card_style}">{marc["texto"]}</div>'
+            folium.Marker([m_lat + 0.00010, m_lon], icon=folium.features.DivIcon(icon_size=(150, 40), icon_anchor=(75, 40), html=html_fixado)).add_to(m)
+
     if str(obs).strip() and str(obs).lower() != 'nan':
         observacoes_html = str(obs).replace('\n', '<br>')
         html_obs = f'<div style="{card_style}">{observacoes_html}</div>'
@@ -307,7 +315,7 @@ def construir_mapa_camadas(is_print=False):
         m.add_child(minimap)
     
     if 'lat_c' in locals() and str(lat_c).strip() and str(lon_c).strip():
-        folium.Marker([fl_lat_c, fl_lon_c], icon=folium.features.DivIcon(icon_size=(30,30), icon_anchor=(15,15), html='<div style="font-size: 24px; filter: drop-shadow(2px 2px 2px white); font-family: Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif;">🏠</div>')).add_to(m)
+        folium.Marker([fl_lat_c, fl_lon_c], icon=folium.features.DivIcon(icon_size=(30,30), icon_anchor=(15,15), html='<div style="font-size: 24px; line-height: 1; display: block; filter: drop-shadow(2px 2px 2px white); font-family: Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif;">🏠</div>')).add_to(m)
         lbl_lat_cliente = fl_lat_c + float(st.session_state.y_cli)
         lbl_lon_cliente = fl_lon_c + float(st.session_state.x_cli)
         info_tel = f"<br>TEL: {telefone}" if 'telefone' in locals() and str(telefone).strip() else ""
@@ -315,7 +323,7 @@ def construir_mapa_camadas(is_print=False):
         folium.Marker([lbl_lat_cliente, lbl_lon_cliente], icon=folium.features.DivIcon(icon_size=(250, 60), icon_anchor=(125, 30), html=html_cliente)).add_to(m)
         
     if 'lat_t' in locals() and str(lat_t).strip() and str(lon_t).strip():
-        folium.Marker([fl_lat_t, fl_lon_t], icon=folium.features.DivIcon(icon_size=(25,25), icon_anchor=(12,12), html='<div style="font-size: 18px; background-color: #b0b0b0; border: 2px solid black; text-align: center; border-radius: 2px; filter: drop-shadow(1px 1px 1px white); font-family: Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif;">⚡</div>')).add_to(m)
+        folium.Marker([fl_lat_t, fl_lon_t], icon=folium.features.DivIcon(icon_size=(25,25), icon_anchor=(12,12), html='<div style="font-size: 18px; line-height: 1; display: block; background-color: #b0b0b0; border: 2px solid black; text-align: center; border-radius: 2px; filter: drop-shadow(1px 1px 1px white); font-family: Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif;">⚡</div>')).add_to(m)
         lbl_lat_trafo = fl_lat_t + float(st.session_state.y_tra)
         lbl_lon_trafo = fl_lon_t + float(st.session_state.x_tra)
         html_trafo = f'<div style="{card_style}">TRAFO: {num_trafo if "num_trafo" in locals() else ""}</div>'
