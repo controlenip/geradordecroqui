@@ -13,7 +13,8 @@ import time
 from datetime import datetime
 from openpyxl.styles import Font
 
-from database import load_core_data
+# Configuração da Página (Deve ser a primeira linha do app isolado)
+st.set_page_config(page_title="Roteirizador Operacional", page_icon="🚙", layout="wide")
 
 # Injeção de CSS
 st.markdown("""
@@ -61,7 +62,7 @@ def normalizar_municipios(series_mun):
 
 def atualizar_status_via_df(df_principal, df_status, coluna_alvo):
     try:
-        chave_nome = df_status.columns[0] # Assume que a coluna 0 é o protocolo
+        chave_nome = df_status.columns[0]
         df_status[chave_nome] = df_status[chave_nome].astype(str).str.strip()
         df_status_map = df_status.set_index(chave_nome)[coluna_alvo].to_dict()
         if 'PROTOCOLO' in df_principal.columns:
@@ -161,21 +162,17 @@ def identificar_icone_folium(row, colunas):
 
 def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
     df_export = df.copy()
-    
-    # 1. Filtra as linhas artificiais criadas pelo roteirizador
     if 'PROTOCOLO' in df_export.columns:
         df_export = df_export[~df_export['PROTOCOLO'].isin(['RETORNO_BASE', 'PAUSA_ALMOCO'])]
         
     if 'ROTA_GEOMETRIA' in df_export.columns: 
         df_export = df_export.drop(columns=['ROTA_GEOMETRIA'])
         
-    # 2. Exclui colunas indesejadas
     colunas_remover = ['STATUS LIST', 'INICIO AVARIA', 'STATUS ATUAL (LEVANTAMENTO)', 'DESCRICAO']
     for col in colunas_remover:
         if col in df_export.columns:
             df_export = df_export.drop(columns=[col])
 
-    # 3. Organiza a ordem para preservar o formato original + colunas de IA geradas
     if colunas_originais:
         cols_atuais = df_export.columns.tolist()
         cols_originais_validas = [c for c in colunas_originais if c in cols_atuais]
@@ -204,7 +201,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir):
 <Document>
   <name>{doc_name}</name>
   <Style id="linha-rota-contorno"><LineStyle><color>ff000000</color><width>8</width></LineStyle></Style>
-  <Style id="linha-rota-centro"><LineStyle><color>ff00ffff</color><width>4</width></LineStyle></Style>
+  <Style id="linha-rota-centro"><LineStyle><color>ffffcc00</color><width>5</width></LineStyle></Style>
   <Style id="icon-blue">
     <IconStyle><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/blu-blank.png</href></Icon><hotSpot x="32" xunits="pixels" y="64" yunits="insetPixels"/></IconStyle>
     <LabelStyle><scale>0.9</scale></LabelStyle>
@@ -370,7 +367,7 @@ def view_roteirizador():
             zip_xl.writestr(f"Roteiro_Geral_{data_atual}.xlsx", gerar_excel_bytes(df_routed, col_prioridade, colunas_originais))
             planilhas_geradas = [f"Roteiro_Geral_{data_atual}.xlsx"]
 
-            # 2. Resumo de Produtividade dos Levantadores (Novo Arquivo Solicitado)
+            # 2. Resumo de Produtividade dos Levantadores
             resumo_levantadores = []
             
             for base in df_routed['BASE_ATRIBUIDA'].unique():
@@ -465,77 +462,43 @@ def view_roteirizador():
 
     with col_up_1:
         st.markdown("### 👥 1. Gestão de Equipes (Bases)")
-        origem_bases = st.radio("Fonte dos Levantadores", ["Banco de Dados do Sistema", "Upload Planilha Levantadores_MA"])
         df_bases = pd.DataFrame()
 
-        if origem_bases == "Banco de Dados do Sistema":
-            _, df_equipes_db, _, _, _, _, _, _ = load_core_data()
-            if not df_equipes_db.empty:
-                df_equipes_db.columns = normalize_cols(df_equipes_db.columns)
-                if 'LEVANTADOR' not in df_equipes_db.columns:
+        # REMOVIDA A OPÇÃO DE BUSCAR NO BANCO DE DADOS
+        # AGORA O SISTEMA ACEITA APENAS O UPLOAD DO ARQUIVO LOCALMENTE
+        base_file = st.file_uploader("Suba a planilha Levantadores_MA", type=["xlsx", "xls"])
+        
+        if base_file:
+            try:
+                df_bases_temp_ui = pd.read_excel(base_file)
+                df_bases_temp_ui.columns = normalize_cols(df_bases_temp_ui.columns)
+                if 'LEVANTADOR' not in df_bases_temp_ui.columns:
                     for p_nome in ['NOME', 'TECNICO', 'EQUIPE', 'COLABORADOR']:
-                        if p_nome in df_equipes_db.columns:
-                            df_equipes_db = df_equipes_db.rename(columns={p_nome: 'LEVANTADOR'})
+                        if p_nome in df_bases_temp_ui.columns:
+                            df_bases_temp_ui = df_bases_temp_ui.rename(columns={p_nome: 'LEVANTADOR'})
                             break
-                            
-                if 'LEVANTADOR' in df_equipes_db.columns:
-                    if 'RESIDENCIA' in df_equipes_db.columns:
-                        muns_unicos = df_equipes_db['RESIDENCIA'].dropna().unique()
-                        mapa_coords = {}
-                        with st.spinner("🌍 Mapeando coordenadas dos municípios-base (Satélite)..."):
-                            for mun in muns_unicos:
-                                if str(mun).strip() != "":
+                if 'LEVANTADOR' in df_bases_temp_ui.columns:
+                    opcoes_levs = sorted([str(x) for x in df_bases_temp_ui['LEVANTADOR'].dropna().unique().tolist() if str(x).upper().strip() != 'SEM LEVANTADOR'])
+                    levs_selecionados = st.multiselect("Selecione as Equipes Principais:", opcoes_levs)
+                    if levs_selecionados:
+                        df_bases = df_bases_temp_ui[df_bases_temp_ui['LEVANTADOR'].isin(levs_selecionados)].copy()
+                        if 'RESIDENCIA' in df_bases.columns:
+                            muns_unicos = df_bases['RESIDENCIA'].dropna().unique()
+                            mapa_coords = {}
+                            with st.spinner("🌍 Mapeando coordenadas dos municípios-base (Satélite)..."):
+                                for mun in muns_unicos:
                                     lat, lon = obter_coordenadas_municipio_cached(mun)
                                     mapa_coords[mun] = (lat, lon)
-                        df_equipes_db['LATITUDE'] = df_equipes_db['RESIDENCIA'].map(lambda x: mapa_coords.get(x, (np.nan, np.nan))[0])
-                        df_equipes_db['LONGITUDE'] = df_equipes_db['RESIDENCIA'].map(lambda x: mapa_coords.get(x, (np.nan, np.nan))[1])
-                    else:
-                        df_equipes_db['LATITUDE'] = pd.to_numeric(df_equipes_db.get('LATITUDE', pd.Series()).astype(str).str.replace(',', '.'), errors='coerce')
-                        df_equipes_db['LONGITUDE'] = pd.to_numeric(df_equipes_db.get('LONGITUDE', pd.Series()).astype(str).str.replace(',', '.'), errors='coerce')
-
-                    lista_lev = sorted([str(x) for x in df_equipes_db['LEVANTADOR'].dropna().unique().tolist()])
-                    levs_selecionados = st.multiselect("Selecione as Equipes que irão a campo:", lista_lev)
-                    if levs_selecionados:
-                        df_bases = df_equipes_db[df_equipes_db['LEVANTADOR'].isin(levs_selecionados)].copy()
+                            df_bases['LATITUDE'] = df_bases['RESIDENCIA'].map(lambda x: mapa_coords.get(x, (np.nan, np.nan))[0])
+                            df_bases['LONGITUDE'] = df_bases['RESIDENCIA'].map(lambda x: mapa_coords.get(x, (np.nan, np.nan))[1])
+                        else:
+                            df_bases['LATITUDE'] = pd.to_numeric(df_bases.get('LATITUDE', pd.Series()).astype(str).str.replace(',', '.'), errors='coerce')
+                            df_bases['LONGITUDE'] = pd.to_numeric(df_bases.get('LONGITUDE', pd.Series()).astype(str).str.replace(',', '.'), errors='coerce')
+                            
                         df_bases = df_bases.dropna(subset=['LATITUDE', 'LONGITUDE'])
                         df_bases['TIPO_EQUIPE'] = 'PRINCIPAL'
-                        if len(df_bases) < len(levs_selecionados):
-                            st.warning("⚠️ Alguns levantadores principais foram ignorados pois o município não foi localizado.")
-                else:
-                    st.error("❌ A coluna 'LEVANTADOR' não foi encontrada no Banco de Dados.")
-        else:
-            base_file = st.file_uploader("Suba a planilha Levantadores_MA", type=["xlsx", "xls"])
-            if base_file:
-                try:
-                    df_bases_temp_ui = pd.read_excel(base_file)
-                    df_bases_temp_ui.columns = normalize_cols(df_bases_temp_ui.columns)
-                    if 'LEVANTADOR' not in df_bases_temp_ui.columns:
-                        for p_nome in ['NOME', 'TECNICO', 'EQUIPE', 'COLABORADOR']:
-                            if p_nome in df_bases_temp_ui.columns:
-                                df_bases_temp_ui = df_bases_temp_ui.rename(columns={p_nome: 'LEVANTADOR'})
-                                break
-                    if 'LEVANTADOR' in df_bases_temp_ui.columns:
-                        opcoes_levs = sorted([str(x) for x in df_bases_temp_ui['LEVANTADOR'].dropna().unique().tolist() if str(x).upper().strip() != 'SEM LEVANTADOR'])
-                        levs_selecionados = st.multiselect("Selecione as Equipes Principais:", opcoes_levs)
-                        if levs_selecionados:
-                            df_bases = df_bases_temp_ui[df_bases_temp_ui['LEVANTADOR'].isin(levs_selecionados)].copy()
-                            if 'RESIDENCIA' in df_bases.columns:
-                                muns_unicos = df_bases['RESIDENCIA'].dropna().unique()
-                                mapa_coords = {}
-                                with st.spinner("🌍 Mapeando coordenadas dos municípios-base (Satélite)..."):
-                                    for mun in muns_unicos:
-                                        lat, lon = obter_coordenadas_municipio_cached(mun)
-                                        mapa_coords[mun] = (lat, lon)
-                                df_bases['LATITUDE'] = df_bases['RESIDENCIA'].map(lambda x: mapa_coords.get(x, (np.nan, np.nan))[0])
-                                df_bases['LONGITUDE'] = df_bases['RESIDENCIA'].map(lambda x: mapa_coords.get(x, (np.nan, np.nan))[1])
-                            else:
-                                df_bases['LATITUDE'] = pd.to_numeric(df_bases.get('LATITUDE', pd.Series()).astype(str).str.replace(',', '.'), errors='coerce')
-                                df_bases['LONGITUDE'] = pd.to_numeric(df_bases.get('LONGITUDE', pd.Series()).astype(str).str.replace(',', '.'), errors='coerce')
-                                
-                            df_bases = df_bases.dropna(subset=['LATITUDE', 'LONGITUDE'])
-                            df_bases['TIPO_EQUIPE'] = 'PRINCIPAL'
-                except Exception as e:
-                    st.error(f"Erro ao ler a planilha: {e}")
+            except Exception as e:
+                st.error(f"Erro ao ler a planilha: {e}")
 
         st.markdown("##### Regra de Atribuição Territorial")
         tipo_atribuicao = st.radio("Regra", ["Clusterização Inteligente por IA (K-Means VRP)", "Por Proximidade Geográfica das Coordenadas (Ignora texto)", "Por Municípios Atendidos (Lê texto da planilha)"], index=2, label_visibility="collapsed")
@@ -951,3 +914,7 @@ def view_roteirizador():
         st.session_state.roteamento_concluido = True
         
         st.rerun()
+
+# Chamada direta para uso do app isolado
+if __name__ == "__main__":
+    view_roteirizador()
