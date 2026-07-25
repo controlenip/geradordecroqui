@@ -29,6 +29,8 @@ st.markdown("""
 # ==========================================
 def limpar_roteirizador():
     st.session_state.roteamento_concluido = False
+    st.session_state.vrp_status = "IDLE"
+    st.session_state.vrp_state = {}
     st.session_state.df_routed = pd.DataFrame()
     st.session_state.bases_records = []
     st.session_state.tipo_periodo = "Dia"
@@ -264,21 +266,19 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir):
 # VIEW PRINCIPAL DA PÁGINA
 # ==========================================
 def view_roteirizador():
-    if "roteamento_concluido" not in st.session_state:
-        st.session_state.roteamento_concluido = False
-    if "df_routed" not in st.session_state:
-        st.session_state.df_routed = pd.DataFrame()
-    if "bases_records" not in st.session_state:
-        st.session_state.bases_records = []
-    if "tipo_periodo" not in st.session_state:
-        st.session_state.tipo_periodo = "Dia"
-    if "colunas_exibir" not in st.session_state:
-        st.session_state.colunas_exibir = []
-    if "col_prioridade" not in st.session_state:
-        st.session_state.col_prioridade = "TIPO NOTA"
-    if "colunas_originais" not in st.session_state:
-        st.session_state.colunas_originais = []
+    # Inicialização de Variáveis de Estado
+    if "roteamento_concluido" not in st.session_state: st.session_state.roteamento_concluido = False
+    if "vrp_status" not in st.session_state: st.session_state.vrp_status = "IDLE"
+    if "vrp_state" not in st.session_state: st.session_state.vrp_state = {}
+    if "df_routed" not in st.session_state: st.session_state.df_routed = pd.DataFrame()
+    if "bases_records" not in st.session_state: st.session_state.bases_records = []
+    if "colunas_exibir" not in st.session_state: st.session_state.colunas_exibir = []
+    if "col_prioridade" not in st.session_state: st.session_state.col_prioridade = "TIPO NOTA"
+    if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
 
+    # -------------------------------------------------------------
+    # 1. TELA DE RESULTADOS (Após Roteirização Finalizada)
+    # -------------------------------------------------------------
     if st.session_state.roteamento_concluido and not st.session_state.df_routed.empty:
         st.markdown("## 🎯 Resultados da Roteirização Corporativa")
         st.markdown("### ✍️ Ajuste Fino Manual (Painel do Despachante)")
@@ -363,20 +363,15 @@ def view_roteirizador():
         
         buf_zip_xl = io.BytesIO()
         with zipfile.ZipFile(buf_zip_xl, 'w', zipfile.ZIP_DEFLATED) as zip_xl:
-            # 1. Roteiro Geral 
             zip_xl.writestr(f"Roteiro_Geral_{data_atual}.xlsx", gerar_excel_bytes(df_routed, col_prioridade, colunas_originais))
             planilhas_geradas = [f"Roteiro_Geral_{data_atual}.xlsx"]
 
-            # 2. Resumo de Produtividade dos Levantadores
             resumo_levantadores = []
-            
             for base in df_routed['BASE_ATRIBUIDA'].unique():
                 df_base = df_routed[df_routed['BASE_ATRIBUIDA'] == base]
                 df_base_real = df_base[~df_base['PROTOCOLO'].isin(['RETORNO_BASE', 'PAUSA_ALMOCO'])]
-                
                 base_ref = next((b for b in bases_records if b['LEVANTADOR'] == base), None)
                 tipo_eq = base_ref.get('TIPO_EQUIPE', 'PRINCIPAL') if base_ref else 'DESCONHECIDO'
-                
                 qtd_comum = len(df_base_real[df_base_real['PRIORIDADE'] == 'Não']) if 'PRIORIDADE' in df_base_real.columns else len(df_base_real)
                 qtd_prio = len(df_base_real[df_base_real['PRIORIDADE'] == 'Sim']) if 'PRIORIDADE' in df_base_real.columns else 0
                 total_km = df_base['DISTANCIA_PONTO_ANTERIOR_KM'].sum()
@@ -396,7 +391,6 @@ def view_roteirizador():
             zip_xl.writestr(f"Resumo_Levantadores_{data_atual}.xlsx", buf_resumo_lev.getvalue())
             planilhas_geradas.append(f"Resumo_Levantadores_{data_atual}.xlsx")
             
-            # 3. Planilhas Individuais
             for base_nome in df_routed['BASE_ATRIBUIDA'].unique():
                 df_lev = df_routed[df_routed['BASE_ATRIBUIDA'] == base_nome].copy()
                 nome_seguro = re.sub(r'[^A-Za-z0-9_]', '', str(base_nome).replace(" ", "_"))
@@ -428,11 +422,252 @@ def view_roteirizador():
         col_b2.download_button("🗺️ 2. Baixar Mapas (KML ZIP)", data=zip_kml_bytes, file_name=f"Mapas_KML_{data_atual}.zip", mime="application/zip", use_container_width=True)
         if col_b3.button("🧹 Zerar Roteirizador", type="primary", use_container_width=True):
             limpar_roteirizador()
-        
-        return 
+            
+        return # Impede que o resto da tela apareça
 
     # -------------------------------------------------------------
-    # TELA DE CONFIGURAÇÃO INICIAL
+    # 2. MÁQUINA DE ESTADOS - ROTEAMENTO CONTÍNUO (PAUSA/PLAY)
+    # -------------------------------------------------------------
+    if st.session_state.vrp_status in ["RUNNING", "PAUSED"]:
+        st.markdown("## 🚀 Execução do Motor de Roteirização")
+        st.markdown("O sistema está conectando via satélite para agrupar e traçar os percursos.")
+        
+        c1, c2, c3 = st.columns([1, 1, 2])
+        if st.session_state.vrp_status == "RUNNING":
+            if c1.button("⏸️ Pausar Roteirização", use_container_width=True):
+                st.session_state.vrp_status = "PAUSED"
+                st.rerun()
+        else:
+            st.warning("⚠️ **Processo Pausado.** Clique em Retomar quando a internet estiver estável.")
+            if c1.button("▶️ Retomar", use_container_width=True, type="primary"):
+                st.session_state.vrp_state['last_time'] = time.time() # Atualiza o timer para ignorar o tempo pausado
+                st.session_state.vrp_status = "RUNNING"
+                st.rerun()
+                
+        if c2.button("⏹️ Parar (Descartar)", use_container_width=True):
+            limpar_roteirizador() # Zera o estado e volta pro início
+            
+        state = st.session_state.vrp_state
+        cfg = state['config']
+        total = state['total_obras']
+        progresso = min(state['obras_processadas'] / total, 1.0) if total > 0 else 1.0
+        
+        st.progress(progresso)
+        
+        if st.session_state.vrp_status == "RUNNING":
+            # Atualiza e calcula estimativa de tempo
+            agora = time.time()
+            state['tempo_processamento'] += (agora - state['last_time'])
+            state['last_time'] = agora
+            
+            if state['obras_processadas'] > 0:
+                avg = state['tempo_processamento'] / state['obras_processadas']
+                restantes = total - state['obras_processadas']
+                est_rem = avg * restantes
+                m, s = divmod(int(est_rem), 60)
+                h, m = divmod(m, 60)
+                if h > 0: c3.markdown(f"⏳ **Conclusão em aprox:** {h:02d}h {m:02d}m {s:02d}s")
+                else: c3.markdown(f"⏳ **Conclusão em aprox:** {m:02d}m {s:02d}s")
+            
+            status_text = st.empty()
+            df_todas_bases_ativas = pd.DataFrame(st.session_state.bases_records)
+            
+            # --- FASE 1: INÍCIO DO LEVANTADOR ---
+            if state['fase'] == 'INIT':
+                if state['b_idx'] >= len(state['b_names']):
+                    state['fase'] = 'DONE'
+                else:
+                    b_name = state['b_names'][state['b_idx']]
+                    base_ref = df_todas_bases_ativas[df_todas_bases_ativas['LEVANTADOR'] == b_name].iloc[0]
+                    if pd.isna(base_ref.get('LATITUDE')):
+                        state['b_idx'] += 1
+                    else:
+                        state['base_lat'] = float(base_ref['LATITUDE'])
+                        state['base_lon'] = float(base_ref['LONGITUDE'])
+                        state['start_lat'] = state['base_lat']
+                        state['start_lon'] = state['base_lon']
+                        state['periodo_atual'] = 1
+                        state['ordem_absoluta'] = 1
+                        state['fase'] = 'BUILD_DAY'
+                st.rerun()
+                
+            # --- FASE 2: CLUSTERIZAÇÃO DO DIA E IA TSP ---
+            elif state['fase'] == 'BUILD_DAY':
+                b_name = state['b_names'][state['b_idx']]
+                status_text.info(f"🧠 Organizando {cfg['tipo_periodo']} {state['periodo_atual']} para **{b_name}**...")
+                
+                unvisited = state['unvisited']
+                unv_b = unvisited[unvisited['BASE_ATRIBUIDA'] == b_name]
+                
+                if unv_b.empty:
+                    state['fase'] = 'END_TEAM'
+                    st.rerun()
+                    
+                if state['periodo_atual'] > cfg['limite_periodos']:
+                    state['obras_sobra_total'] += len(unv_b)
+                    state['obras_processadas'] += len(unv_b)
+                    state['unvisited'] = unvisited[unvisited['BASE_ATRIBUIDA'] != b_name]
+                    state['fase'] = 'END_TEAM'
+                    st.rerun()
+                
+                dia_obras_prio = []
+                dia_obras_norm = []
+                tempo_dia = 0.0
+                qtd_dia = 0
+                km_dia = 0.0
+                curr_lat, curr_lon = state['base_lat'], state['base_lon']
+                unv_b_temp = unv_b.copy()
+                
+                while not unv_b_temp.empty:
+                    unvisited_prio = unv_b_temp[unv_b_temp['PRIORIDADE'] == 'Sim']
+                    if not unvisited_prio.empty:
+                        dists = haversine_vectorized(curr_lat, curr_lon, unvisited_prio['LATITUDE'].values, unvisited_prio['LONGITUDE'].values)
+                        nearest_idx = unvisited_prio.index[dists.argmin()]
+                        is_prio = True
+                    else:
+                        dists = haversine_vectorized(curr_lat, curr_lon, unv_b_temp['LATITUDE'].values, unv_b_temp['LONGITUDE'].values)
+                        nearest_idx = unv_b_temp.index[dists.argmin()]
+                        is_prio = False
+                        
+                    nearest_row = unv_b_temp.loc[nearest_idx]
+                    dist_km = round(dists.min(), 2)
+                    is_rural = False
+                    if 'LOCALIDADE' in nearest_row and str(nearest_row['LOCALIDADE']).upper() == 'RURAL': is_rural = True
+                    if 'TIPO NOTA' in nearest_row and str(nearest_row['TIPO NOTA']).upper() == 'UNR': is_rural = True
+                    
+                    tempo_viagem_h = (dist_km / cfg['velocidade_media_kmh']) * (1.6 if is_rural else 1.0)
+                    tempo_necessario = tempo_viagem_h + cfg['tempo_medio_obra']
+                    dist_retorno_est = haversine_vectorized(nearest_row['LATITUDE'], nearest_row['LONGITUDE'], state['base_lat'], state['base_lon'])
+                    
+                    if cfg['modo_limite'] == "Quantidade Fixa de Obras" and qtd_dia >= cfg['obras_por_periodo']: break
+                    if cfg['modo_limite'] != "Quantidade Fixa de Obras" and tempo_dia + tempo_necessario > cfg['horas_por_dia'] and qtd_dia > 0: break
+                    if (km_dia + dist_km + dist_retorno_est) > cfg['limite_km_diario'] and qtd_dia > 0: break
+                        
+                    if is_prio: dia_obras_prio.append(nearest_row.to_dict())
+                    else: dia_obras_norm.append(nearest_row.to_dict())
+                    
+                    curr_lat, curr_lon = nearest_row['LATITUDE'], nearest_row['LONGITUDE']
+                    unv_b_temp = unv_b_temp.drop(nearest_idx)
+                    tempo_dia += tempo_necessario
+                    km_dia += dist_km
+                    qtd_dia += 1
+                
+                if len(dia_obras_prio) == 0 and len(dia_obras_norm) == 0:
+                    state['fase'] = 'END_TEAM'
+                    st.rerun()
+                    
+                last_prio_lat, last_prio_lon = state['base_lat'], state['base_lon']
+                if len(dia_obras_prio) > 0:
+                    last_prio_lat, last_prio_lon = dia_obras_prio[-1]['LATITUDE'], dia_obras_prio[-1]['LONGITUDE']
+                    
+                dia_obras_norm = otimizar_rota_tsp_2opt(dia_obras_norm, last_prio_lat, last_prio_lon)
+                state['dia_final'] = dia_obras_prio + dia_obras_norm
+                
+                state['unvisited'] = unvisited.drop(unv_b.index.difference(unv_b_temp.index))
+                state['start_lat'] = state['base_lat']
+                state['start_lon'] = state['base_lon']
+                state['tempo_acumulado_rota'] = 0.0
+                state['almoco_inserido'] = False
+                state['fase'] = 'PROCESS_DAY'
+                st.rerun()
+
+            # --- FASE 3: MAPEAMENTO DE RUAS COM OSRM ---
+            elif state['fase'] == 'PROCESS_DAY':
+                b_name = state['b_names'][state['b_idx']]
+                
+                if len(state['dia_final']) == 0:
+                    state['fase'] = 'END_DAY'
+                    st.rerun()
+                    
+                obra = state['dia_final'].pop(0) # Puxa apenas a próxima obra da fila
+                
+                if cfg['modo_limite'] != "Quantidade Fixa de Obras" and state['tempo_acumulado_rota'] >= 4.0 and not state['almoco_inserido']:
+                    state['routed_data'].append({
+                        'PROTOCOLO': 'PAUSA_ALMOCO', 'NOME DO SOLICITANTE': '🍔 HORÁRIO DE ALMOÇO (1h)',
+                        'LATITUDE': state['start_lat'], 'LONGITUDE': state['start_lon'], 'BASE_ATRIBUIDA': b_name, 'ORDEM': state['ordem_absoluta'],
+                        'SEMANA': state['periodo_atual'] if cfg['tipo_periodo'] == "Semana" else 1, 'DIA': state['periodo_atual'] if cfg['tipo_periodo'] == "Dia" else 1,
+                        'PERIODO': state['periodo_atual'], 'DISTANCIA_PONTO_ANTERIOR_KM': 0.0, 'TEMPO_VIAGEM_MINUTOS': 60.0,
+                        'ROTA_GEOMETRIA': [[state['start_lon'], state['start_lat']], [state['start_lon'], state['start_lat']]], 'PRIORIDADE': 'Não'
+                    })
+                    state['almoco_inserido'] = True
+                    state['ordem_absoluta'] += 1
+                    state['tempo_acumulado_rota'] += 1.0
+                    
+                status_text.warning(f"🗺️ Roteando **{b_name}** | {cfg['tipo_periodo']} {state['periodo_atual']} | Obra {state['ordem_absoluta']} (Conectando ao Satélite...)")
+                
+                rota_geom, dur_sec = obter_rota_ruas(state['start_lat'], state['start_lon'], obra['LATITUDE'], obra['LONGITUDE'], cfg['velocidade_media_kmh'])
+                
+                is_rur = False
+                if 'LOCALIDADE' in obra and str(obra['LOCALIDADE']).upper() == 'RURAL': is_rur = True
+                if 'TIPO NOTA' in obra and str(obra['TIPO NOTA']).upper() == 'UNR': is_rur = True
+                if is_rur: dur_sec *= 1.6
+                
+                obra['ORDEM'] = state['ordem_absoluta']
+                obra['SEMANA'] = state['periodo_atual'] if cfg['tipo_periodo'] == "Semana" else 1
+                obra['DIA'] = state['periodo_atual'] if cfg['tipo_periodo'] == "Dia" else 1
+                obra['PERIODO'] = state['periodo_atual']
+                obra['DISTANCIA_PONTO_ANTERIOR_KM'] = round(haversine_vectorized(state['start_lat'], state['start_lon'], obra['LATITUDE'], obra['LONGITUDE']), 2)
+                obra['TEMPO_VIAGEM_MINUTOS'] = round(dur_sec / 60.0, 1)
+                obra['ROTA_GEOMETRIA'] = rota_geom
+                
+                state['routed_data'].append(obra)
+                state['start_lat'] = obra['LATITUDE']
+                state['start_lon'] = obra['LONGITUDE']
+                state['ordem_absoluta'] += 1
+                state['tempo_acumulado_rota'] += (dur_sec / 3600.0) + cfg['tempo_medio_obra']
+                state['obras_processadas'] += 1
+                
+                time.sleep(0.05) # Pausa micro para a interface respirar
+                st.rerun() # Dispara uma nova leitura da interface (O que permite capturar o clique do botão Pausar)
+
+            # --- FASE 4: FIM DO DIA (RETORNO À BASE) ---
+            elif state['fase'] == 'END_DAY':
+                b_name = state['b_names'][state['b_idx']]
+                status_text.success(f"🏠 Fechando {cfg['tipo_periodo']} {state['periodo_atual']} de **{b_name}**, traçando retorno...")
+                
+                rota_retorno, dur_ret_seg = obter_rota_ruas(state['start_lat'], state['start_lon'], state['base_lat'], state['base_lon'], cfg['velocidade_media_kmh'])
+                dist_retorno = haversine_vectorized(state['start_lat'], state['start_lon'], state['base_lat'], state['base_lon'])
+                
+                state['routed_data'].append({
+                    'PROTOCOLO': 'RETORNO_BASE', 'NOME DO SOLICITANTE': 'BASE_RETORNO', 'LATITUDE': state['base_lat'], 'LONGITUDE': state['base_lon'],
+                    'BASE_ATRIBUIDA': b_name, 'ORDEM': state['ordem_absoluta'], 'SEMANA': state['periodo_atual'] if cfg['tipo_periodo'] == "Semana" else 1,
+                    'DIA': state['periodo_atual'] if cfg['tipo_periodo'] == "Dia" else 1, 'PERIODO': state['periodo_atual'],
+                    'DISTANCIA_PONTO_ANTERIOR_KM': round(dist_retorno, 2), 'TEMPO_VIAGEM_MINUTOS': round(dur_ret_seg / 60.0, 1),
+                    'ROTA_GEOMETRIA': rota_retorno, 'PRIORIDADE': 'Não'
+                })
+                
+                state['periodo_atual'] += 1
+                state['ordem_absoluta'] = 1
+                state['fase'] = 'BUILD_DAY'
+                st.rerun()
+
+            # --- FASE 5: PRÓXIMA EQUIPE ---
+            elif state['fase'] == 'END_TEAM':
+                state['b_idx'] += 1
+                state['fase'] = 'INIT'
+                st.rerun()
+                
+            # --- FASE 6: FINALIZAÇÃO TOTAL ---
+            elif state['fase'] == 'DONE':
+                status_text.success("✅ Roteirização finalizada! Preparando arquivos finais...")
+                
+                if state['obras_sobra_total'] > 0:
+                    st.warning(f"⏳ {state['obras_sobra_total']} obras ficaram de fora do roteiro porque a carga horária/limite estourou.")
+                    time.sleep(2) 
+                    
+                df_final_route = pd.DataFrame(state['routed_data'])
+                if not df_final_route.empty:
+                    df_final_route['DISTANCIA_PROXIMO_PONTO_KM'] = df_final_route.groupby(['BASE_ATRIBUIDA', 'PERIODO'])['DISTANCIA_PONTO_ANTERIOR_KM'].shift(-1).fillna(0.0)
+                    
+                st.session_state.df_routed = df_final_route
+                st.session_state.roteamento_concluido = True
+                st.session_state.vrp_status = "IDLE"
+                st.rerun()
+                
+        return # Impede que a tela de configuração de baixo seja renderizada enquanto roda!
+
+    # -------------------------------------------------------------
+    # 3. TELA DE CONFIGURAÇÃO INICIAL (Uploads e Ajustes)
     # -------------------------------------------------------------
     st.markdown("## 🚙 Roteirizador Operacional Avançado")
     st.markdown("Planeje rotas inteligentes integradas a controles de esforço e retorno à base.")
@@ -464,8 +699,6 @@ def view_roteirizador():
         st.markdown("### 👥 1. Gestão de Equipes (Bases)")
         df_bases = pd.DataFrame()
 
-        # REMOVIDA A OPÇÃO DE BUSCAR NO BANCO DE DADOS
-        # AGORA O SISTEMA ACEITA APENAS O UPLOAD DO ARQUIVO LOCALMENTE
         base_file = st.file_uploader("Suba a planilha Levantadores_MA", type=["xlsx", "xls"])
         
         if base_file:
@@ -742,177 +975,55 @@ def view_roteirizador():
             c_ex2.info("⚡ **Prioridade Automática Ativada:** Obras com TIPO NOTA igual a **CCF, DIF, MGD, MTP, ASC** ou **SID** recebem pino vermelho e são roteirizadas apenas para Equipes Principais.")
             col_prioridade = "TIPO NOTA"
 
-    # === INÍCIO DO PROCESSAMENTO BIFÁSICO (TSP + OSRM) ===
-    if st.button("🚀 Iniciar Motor de Roteirização (Processo em Nuvem)", type="primary", use_container_width=True):
+    # =============================================================
+    # BOTÃO PARA ATIVAR A MÁQUINA DE ESTADOS
+    # =============================================================
+    if st.button("🚀 Iniciar Motor de Roteirização", type="primary", use_container_width=True):
         if df_tasks_alocadas.empty:
-            st.error("Selecione equipes e regras compatíveis com a planilha primeiro."); return
+            st.error("Selecione equipes e regras compatíveis com a planilha primeiro.")
+            return
 
-        progresso_texto = st.empty()
-        barra_progresso = st.progress(0)
-        tempo_restante_texto = st.empty()
-        
-        start_time = time.time()
-        api_calls = 0
-        total_obras_rotear = len(df_tasks_alocadas)
-        obras_processadas = 0
-        obras_sobra_total = 0
-
-        routed_data = []
-        df_todas_bases_ativas = pd.DataFrame(bases_records)
-        levantadores_unicos = list(set([b['LEVANTADOR'] for b in bases_records]))
-
-        for b_name in levantadores_unicos:
-            base_ref = df_todas_bases_ativas[df_todas_bases_ativas['LEVANTADOR'] == b_name].iloc[0]
-            if pd.isna(base_ref.get('LATITUDE')): continue
-            
-            base_lat, base_lon = float(base_ref['LATITUDE']), float(base_ref['LONGITUDE'])
-            unvisited = df_tasks_alocadas[df_tasks_alocadas['BASE_ATRIBUIDA'] == b_name].copy()
-            
-            periodo_atual = 1
-            ordem_absoluta = 1
-            
-            while not unvisited.empty:
-                dia_obras_prio = []
-                dia_obras_norm = []
-                tempo_dia = 0.0
-                qtd_dia = 0
-                km_dia = 0.0
-                curr_lat, curr_lon = base_lat, base_lon
-                
-                while not unvisited.empty:
-                    unvisited_prio = unvisited[unvisited['PRIORIDADE'] == 'Sim']
-                    if not unvisited_prio.empty:
-                        dists = haversine_vectorized(curr_lat, curr_lon, unvisited_prio['LATITUDE'].values, unvisited_prio['LONGITUDE'].values)
-                        nearest_idx = unvisited_prio.index[dists.argmin()]
-                        is_prio = True
-                    else:
-                        dists = haversine_vectorized(curr_lat, curr_lon, unvisited['LATITUDE'].values, unvisited['LONGITUDE'].values)
-                        nearest_idx = unvisited.index[dists.argmin()]
-                        is_prio = False
-                    
-                    nearest_row = unvisited.loc[nearest_idx]
-                    dist_km = round(dists.min(), 2)
-                    
-                    is_rural = False
-                    if 'LOCALIDADE' in nearest_row and str(nearest_row['LOCALIDADE']).upper() == 'RURAL': is_rural = True
-                    if 'TIPO NOTA' in nearest_row and str(nearest_row['TIPO NOTA']).upper() == 'UNR': is_rural = True
-                    
-                    tempo_viagem_h = (dist_km / velocidade_media_kmh) * (1.6 if is_rural else 1.0)
-                    tempo_necessario = tempo_viagem_h + tempo_medio_obra
-                    
-                    dist_retorno_est = haversine_vectorized(nearest_row['LATITUDE'], nearest_row['LONGITUDE'], base_lat, base_lon)
-                    
-                    if modo_limite == "Quantidade Fixa de Obras" and qtd_dia >= obras_por_periodo: break
-                    if modo_limite != "Quantidade Fixa de Obras" and tempo_dia + tempo_necessario > horas_por_dia and qtd_dia > 0: break
-                    if (km_dia + dist_km + dist_retorno_est) > limite_km_diario and qtd_dia > 0: break
-                        
-                    if is_prio: dia_obras_prio.append(nearest_row.to_dict())
-                    else: dia_obras_norm.append(nearest_row.to_dict())
-                    
-                    curr_lat, curr_lon = nearest_row['LATITUDE'], nearest_row['LONGITUDE']
-                    unvisited = unvisited.drop(nearest_idx)
-                    tempo_dia += tempo_necessario
-                    km_dia += dist_km
-                    qtd_dia += 1
-                    
-                if len(dia_obras_prio) == 0 and len(dia_obras_norm) == 0: break
-                
-                progresso_texto.text(f"🧠 Otimizando sequência do {tipo_periodo} {periodo_atual} para {b_name} (TSP 2-Opt)...")
-                
-                last_prio_lat, last_prio_lon = base_lat, base_lon
-                if len(dia_obras_prio) > 0:
-                    last_prio_lat, last_prio_lon = dia_obras_prio[-1]['LATITUDE'], dia_obras_prio[-1]['LONGITUDE']
-                    
-                dia_obras_norm = otimizar_rota_tsp_2opt(dia_obras_norm, last_prio_lat, last_prio_lon)
-                dia_final = dia_obras_prio + dia_obras_norm
-                
-                start_lat, start_lon = base_lat, base_lon
-                almoco_inserido = False
-                tempo_acumulado_rota = 0.0
-                
-                for obra in dia_final:
-                    if modo_limite != "Quantidade Fixa de Obras" and tempo_acumulado_rota >= 4.0 and not almoco_inserido:
-                        routed_data.append({
-                            'PROTOCOLO': 'PAUSA_ALMOCO', 'NOME DO SOLICITANTE': '🍔 HORÁRIO DE ALMOÇO (1h)',
-                            'LATITUDE': start_lat, 'LONGITUDE': start_lon, 'BASE_ATRIBUIDA': b_name, 'ORDEM': ordem_absoluta,
-                            'SEMANA': periodo_atual if tipo_periodo == "Semana" else 1, 'DIA': periodo_atual if tipo_periodo == "Dia" else 1,
-                            'PERIODO': periodo_atual, 'DISTANCIA_PONTO_ANTERIOR_KM': 0.0, 'TEMPO_VIAGEM_MINUTOS': 60.0,
-                            'ROTA_GEOMETRIA': [[start_lon, start_lat], [start_lon, start_lat]], 'PRIORIDADE': 'Não'
-                        })
-                        almoco_inserido = True
-                        ordem_absoluta += 1
-                        tempo_acumulado_rota += 1.0
-                        
-                    progresso_texto.text(f"🗺️ Mapeando {b_name} | {tipo_periodo} {periodo_atual} | Obra {ordem_absoluta} via Satélite...")
-                    rota_geom, dur_sec = obter_rota_ruas(start_lat, start_lon, obra['LATITUDE'], obra['LONGITUDE'], velocidade_media_kmh)
-                    api_calls += 1
-                    
-                    is_rur = False
-                    if 'LOCALIDADE' in obra and str(obra['LOCALIDADE']).upper() == 'RURAL': is_rur = True
-                    if 'TIPO NOTA' in obra and str(obra['TIPO NOTA']).upper() == 'UNR': is_rur = True
-                    if is_rur: dur_sec *= 1.6
-                    
-                    obra['ORDEM'] = ordem_absoluta
-                    obra['SEMANA'] = periodo_atual if tipo_periodo == "Semana" else 1
-                    obra['DIA'] = periodo_atual if tipo_periodo == "Dia" else 1
-                    obra['PERIODO'] = periodo_atual
-                    obra['DISTANCIA_PONTO_ANTERIOR_KM'] = round(haversine_vectorized(start_lat, start_lon, obra['LATITUDE'], obra['LONGITUDE']), 2)
-                    obra['TEMPO_VIAGEM_MINUTOS'] = round(dur_sec / 60.0, 1)
-                    obra['ROTA_GEOMETRIA'] = rota_geom
-                    
-                    routed_data.append(obra)
-                    start_lat, start_lon = obra['LATITUDE'], obra['LONGITUDE']
-                    ordem_absoluta += 1
-                    tempo_acumulado_rota += (dur_sec / 3600.0) + tempo_medio_obra
-                    obras_processadas += 1
-                    
-                    barra_progresso.progress(min(obras_processadas / total_obras_rotear, 1.0))
-                    
-                    elapsed = time.time() - start_time
-                    avg_time = elapsed / api_calls
-                    obras_restantes = total_obras_rotear - obras_processadas
-                    if obras_restantes > 0:
-                        est_rem = avg_time * obras_restantes
-                        m, s = divmod(int(est_rem), 60)
-                        h, m = divmod(m, 60)
-                        if h > 0: tempo_restante_texto.markdown(f"⏳ **Tempo estimado restante:** {h:02d}h {m:02d}m {s:02d}s")
-                        else: tempo_restante_texto.markdown(f"⏳ **Tempo estimado restante:** {m:02d}m {s:02d}s")
-                    else: tempo_restante_texto.markdown("✅ **Processamento Concluído! Montando arquivos...**")
-                    time.sleep(1.2)
-                    
-                progresso_texto.text(f"🏠 Encerrando pacote de {b_name}, traçando retorno final...")
-                rota_retorno, dur_ret_seg = obter_rota_ruas(start_lat, start_lon, base_lat, base_lon, velocidade_media_kmh)
-                api_calls += 1
-                dist_retorno = haversine_vectorized(start_lat, start_lon, base_lat, base_lon)
-                routed_data.append({
-                    'PROTOCOLO': 'RETORNO_BASE', 'NOME DO SOLICITANTE': 'BASE_RETORNO', 'LATITUDE': base_lat, 'LONGITUDE': base_lon,
-                    'BASE_ATRIBUIDA': b_name, 'ORDEM': ordem_absoluta, 'SEMANA': periodo_atual if tipo_periodo == "Semana" else 1,
-                    'DIA': periodo_atual if tipo_periodo == "Dia" else 1, 'PERIODO': periodo_atual,
-                    'DISTANCIA_PONTO_ANTERIOR_KM': round(dist_retorno, 2), 'TEMPO_VIAGEM_MINUTOS': round(dur_ret_seg / 60.0, 1),
-                    'ROTA_GEOMETRIA': rota_retorno, 'PRIORIDADE': 'Não'
-                })
-                time.sleep(1.2)
-                
-                periodo_atual += 1
-                ordem_absoluta = 1
-                if periodo_atual > limite_periodos:
-                    obras_sobra_total += len(unvisited)
-                    obras_processadas += len(unvisited) 
-                    break
-
-        if obras_sobra_total > 0:
-            st.warning(f"⏳ {obras_sobra_total} obras ficaram de fora do roteiro porque a carga horária/limite estourou.")
-
-        df_final_route = pd.DataFrame(routed_data)
-        df_final_route['DISTANCIA_PROXIMO_PONTO_KM'] = df_final_route.groupby(['BASE_ATRIBUIDA', 'PERIODO'])['DISTANCIA_PONTO_ANTERIOR_KM'].shift(-1).fillna(0.0)
-        
-        st.session_state.df_routed = df_final_route
+        # Salvando as configurações na memória antes de ocultar a tela de configuração
         st.session_state.bases_records = bases_records
         st.session_state.tipo_periodo = tipo_periodo
         st.session_state.colunas_exibir = colunas_exibir
         st.session_state.col_prioridade = col_prioridade
-        st.session_state.roteamento_concluido = True
         
+        # Estrutura principal da Memória de Roteamento para permitir as Pausas
+        st.session_state.vrp_state = {
+            'fase': 'INIT',
+            'config': {
+                'limite_periodos': limite_periodos,
+                'modo_limite': modo_limite,
+                'velocidade_media_kmh': velocidade_media_kmh,
+                'tempo_medio_obra': tempo_medio_obra,
+                'horas_por_dia': horas_por_dia,
+                'limite_km_diario': limite_km_diario,
+                'obras_por_periodo': obras_por_periodo,
+                'tipo_periodo': tipo_periodo
+            },
+            'b_names': list(set([b['LEVANTADOR'] for b in bases_records])),
+            'b_idx': 0,
+            'unvisited': df_tasks_alocadas.copy(),
+            'routed_data': [],
+            
+            'dia_final': [],
+            'periodo_atual': 1,
+            'ordem_absoluta': 1,
+            'base_lat': None, 'base_lon': None,
+            'start_lat': None, 'start_lon': None,
+            'tempo_acumulado_rota': 0.0,
+            'almoco_inserido': False,
+            
+            'obras_processadas': 0,
+            'obras_sobra_total': 0,
+            'total_obras': len(df_tasks_alocadas),
+            'tempo_processamento': 0.0,
+            'last_time': time.time()
+        }
+        
+        # Dispara o gatilho da Máquina de Estados
+        st.session_state.vrp_status = "RUNNING"
         st.rerun()
 
 # Chamada direta para uso do app isolado
