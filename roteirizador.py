@@ -277,7 +277,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
     if colunas_originais:
         cols_atuais = df_export.columns.tolist()
         cols_originais_validas = [c for c in colunas_originais if c in cols_atuais]
-        cols_novas_geradas = [c for c in cols_atuais if c not in cols_originais]
+        cols_novas_geradas = [c for c in cols_atuais if c not in colunas_originais]
         df_export = df_export[cols_originais_validas + cols_novas_geradas]
         
     buf_xl = io.BytesIO()
