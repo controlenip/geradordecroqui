@@ -55,14 +55,12 @@ st.markdown("""
     .block-container { padding-top: 1.2rem !important; padding-bottom: 2rem !important; }
     .stSelectbox label, .stFileUploader label, .stRadio label, .stNumberInput label, .stMultiSelect label { font-size: 14px !important; font-weight: 600 !important; color: #1A4F7C !important; }
 
-    /* STEPPER DE PROGRESSO AJUSTADO (CENTRALIZADO E FLUIDO) */
+    /* STEPPER DE PROGRESSO */
     .stepper-container {
         display: flex;
-        justify-content: center;
-        flex-wrap: wrap;
-        gap: 2.5rem;
+        justify-content: space-between;
         margin-bottom: 1.5rem;
-        padding: 0.85rem 1.2rem;
+        padding: 0.75rem 1rem;
         background: rgba(26, 79, 124, 0.05);
         border-radius: 8px;
         border: 1px solid rgba(26, 79, 124, 0.1);
@@ -74,7 +72,6 @@ st.markdown("""
         display: flex;
         align-items: center;
         gap: 6px;
-        white-space: nowrap;
     }
     .step-item.active {
         color: #0070C0;
@@ -117,21 +114,10 @@ st.markdown("""
         color: #1A4F7C;
     }
 
-    /* CONTAINERS DE UPLOAD (ILHAS DE INFORMAÇÃO) */
-    .upload-box {
-        background: #fdfdfd;
-        border: 1px solid #dcdcdc;
-        border-radius: 10px;
-        padding: 18px;
-        margin-bottom: 15px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.01);
-    }
-
     @media (prefers-color-scheme: dark) {
         .stepper-container { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.08); }
         .metric-card { background: #1e1e1e; border-color: #333333; }
         .metric-content .metric-value { color: #64B5F6; }
-        .upload-box { background: #161a1e; border-color: #2c3238; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1039,10 +1025,11 @@ def view_roteirizador():
         st.markdown("### 👥 1. Levantadores Principais")
         df_bases = pd.DataFrame()
 
-        with st.container():
-            st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+        # =============================================================
+        # DELIMITAÇÃO VISUAL POR CONTAINERS NATIVOS (ST.CONTAINER)
+        # =============================================================
+        with st.container(border=True):
             base_file = st.file_uploader("Suba a planilha Levantadores_MA", type=["xlsx", "xls"])
-            st.markdown('</div>', unsafe_allow_html=True)
         
         if base_file:
             try:
@@ -1082,16 +1069,13 @@ def view_roteirizador():
     with col_up_2:
         st.markdown("### 📁 2. Upload de Demandas (Obras)")
         
-        with st.container():
-            st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+        with st.container(border=True):
             task_files = st.file_uploader("1️⃣ Base Principal (Planilha de Obras Antiga/Original)", type=["xlsx", "xls"], accept_multiple_files=True)
-            st.markdown('</div>', unsafe_allow_html=True)
         
         st.markdown("##### 🔄 Atualização Rápida de Status (Opcional)")
-        with st.container():
-            st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+        
+        with st.container(border=True):
             status_file = st.file_uploader("2️⃣ Planilha Atualizada do SharePoint", type=["xlsx", "xls"])
-            st.markdown('</div>', unsafe_allow_html=True)
         
         df_status_upload = pd.DataFrame()
         coluna_status_selecionada = None
@@ -1108,10 +1092,8 @@ def view_roteirizador():
         st.markdown("##### 🧑‍🤝‍🧑 3. Equipes de Apoio (Temporários - Opcional)")
         st.caption("Recebem APENAS obras comuns. O volume de trabalho é dividido nas mesmas regiões das equipes principais.")
         
-        with st.container():
-            st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+        with st.container(border=True):
             temp_bases_files = st.file_uploader("Suba a(s) planilha(s) de Levantadores Temporários", type=["xlsx", "xls"], accept_multiple_files=True)
-            st.markdown('</div>', unsafe_allow_html=True)
         
         df_bases_temp = pd.DataFrame()
         if temp_bases_files:
