@@ -696,7 +696,7 @@ def view_roteirizador():
     col_up_1, col_up_2 = st.columns(2)
 
     with col_up_1:
-        st.markdown("### 👥 1. Gestão de Equipes (Bases)")
+        st.markdown("### 👥 1. Levantadores Principais")
         df_bases = pd.DataFrame()
 
         base_file = st.file_uploader("Suba a planilha Levantadores_MA", type=["xlsx", "xls"])
