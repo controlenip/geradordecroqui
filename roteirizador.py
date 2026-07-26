@@ -50,7 +50,7 @@ http_session = get_retry_session()
 st.set_page_config(page_title="Roteirizador Enterprise V2", page_icon="⚡", layout="wide")
 
 # ==========================================
-# 2. INJEÇÃO DE CSS CUSTOMIZADO (UX/UI)
+# 2. INJEÇÃO DE CSS CUSTOMIZADO E HELPERS
 # ==========================================
 st.markdown("""
 <style>
@@ -65,7 +65,7 @@ st.markdown("""
     .metric-card:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.1); }
     .metric-icon { font-size: 26px; padding: 12px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
     .metric-content .metric-title { font-size: 13px; font-weight: 700; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
-    .metric-content .metric-value { font-size: 26px; font-weight: 800; color: #212529; }
+    .metric-content .metric-value { font-size: 24px; font-weight: 800; color: #212529; }
     
     .profiling-box { background: rgba(23, 162, 184, 0.05); border-left: 4px solid #17a2b8; padding: 15px; border-radius: 5px; margin-bottom: 20px;}
     
@@ -79,9 +79,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# 3. HELPERS DE DADOS (LIMPEZA E TRANSFORMAÇÃO)
-# ==========================================
+def formatar_moeda(valor):
+    return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 def limpar_roteirizador():
     st.session_state.roteamento_concluido = False
     st.session_state.vrp_status = "IDLE"
@@ -134,8 +134,21 @@ def atualizar_status_via_df(df_principal, df_status, coluna_alvo):
     return df_principal
 
 # ==========================================
-# 4. MOTOR VRP GOOGLE E MATEMÁTICA VETORIAL
+# 4. GEOCODING E MOTOR VRP GOOGLE
 # ==========================================
+def geocode_endereco_nominatim(endereco, municipio):
+    """MUDANÇA 2: Resgate automático de Coordenadas usando Satélite Público"""
+    if pd.isna(endereco) or str(endereco).strip() == "" or pd.isna(municipio): 
+        return np.nan, np.nan
+    query = f"{str(endereco).strip()}, {str(municipio).strip()}, Maranhão, Brasil"
+    url = "https://nominatim.openstreetmap.org/search"
+    try:
+        r = http_session.get(url, params={"q": query, "format": "json", "limit": 1}, headers={"User-Agent": "RoteirizadorEnterprise/10.0"}, timeout=5)
+        if r.status_code == 200 and len(r.json()) > 0:
+            return float(r.json()[0]['lat']), float(r.json()[0]['lon'])
+    except: pass
+    return np.nan, np.nan
+
 def haversine_vectorized(lat1, lon1, lat2, lon2):
     R = 6371.0 
     lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
@@ -439,6 +452,7 @@ def view_roteirizador():
     if "colunas_exibir" not in st.session_state: st.session_state.colunas_exibir = []
     if "col_prioridade" not in st.session_state: st.session_state.col_prioridade = "TIPO NOTA"
     if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
+    if "config_financeira" not in st.session_state: st.session_state.config_financeira = {}
 
     status_exec = st.session_state.vrp_status
     is_done = st.session_state.roteamento_concluido
@@ -458,7 +472,7 @@ def view_roteirizador():
         <div class="{s1_class}">📁 1. Dados e Profiling</div>
         <div class="{s2_class}">⚙️ 2. Filtros Dinâmicos</div>
         <div class="{s3_class}">🚀 3. IA VRP OR-Tools</div>
-        <div class="{s4_class}">🎯 4. Resultados e Integrações</div>
+        <div class="{s4_class}">🎯 4. Resultados e Custos</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -486,8 +500,15 @@ def view_roteirizador():
             limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
             
         st.markdown("---")
+        
+        # MUDANÇA 4: DADOS FINANCEIROS
+        st.markdown("### 💰 Gestão Financeira (ROI)")
+        custo_combustivel = st.number_input("Custo Combustível (R$/L)", min_value=1.0, value=5.80, step=0.1, disabled=is_locked)
+        consumo_veiculo = st.number_input("Consumo Frota (Km/L)", min_value=1.0, value=10.0, step=0.5, disabled=is_locked)
+        custo_hora_equipe = st.number_input("Hora-Homem da Equipe (R$)", min_value=1.0, value=35.0, step=1.0, disabled=is_locked)
+        
+        st.markdown("---")
         st.markdown("### 📡 Conexão de Roteamento")
-        # --- AVISO E EXPANDER INSERIDOS AQUI ---
         url_osrm_base = st.text_input("Endpoint OSRM ⚠️ (NÃO APAGUE OU EDITE):", value="http://router.project-osrm.org", disabled=is_locked)
         with st.expander("❓ Por que não devo alterar este link?"):
             st.caption("Este link conecta o sistema à malha viária real de ruas do mundo. **Se você apagar ou editar este link incorretamente:** o sistema não vai quebrar ou travar, mas passará a calcular todas as rotas e distâncias em **linhas retas**, ignorando as calçadas, sentidos e curvas do mapa.")
@@ -532,6 +553,42 @@ def view_roteirizador():
         c_m2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👥</div><div class="metric-content"><div class="metric-title">Equipes em Campo</div><div class="metric-value">{tot_equipes}</div></div></div>', unsafe_allow_html=True)
         c_m3.markdown(f'<div class="metric-card" style="border-left: 5px solid #10b981;"><div class="metric-icon" style="background: rgba(16, 185, 129, 0.15);">🛣️</div><div class="metric-content"><div class="metric-title">KM Total Projetado</div><div class="metric-value">{tot_km}</div></div></div>', unsafe_allow_html=True)
         c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">🚨</div><div class="metric-content"><div class="metric-title">Prioridades</div><div class="metric-value">{tot_prio}</div></div></div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+        
+        # MUDANÇA 4: CÁLCULO DE CUSTOS E ROI
+        st.markdown("### 💸 Gestão Financeira e Custo da Operação")
+        
+        cf_comb = st.session_state.config_financeira.get('custo_combustivel', 5.80)
+        cf_cons = st.session_state.config_financeira.get('consumo_veiculo', 10.0)
+        cf_hora = st.session_state.config_financeira.get('custo_hora_equipe', 35.0)
+
+        tot_km_val = df_routed['DISTANCIA_PONTO_ANTERIOR_KM'].sum()
+        litros_gastos = tot_km_val / cf_cons if cf_cons > 0 else 0
+        custo_total_combustivel = litros_gastos * cf_comb
+        
+        df_financeiro = df_routed.copy()
+        df_financeiro['_HORA_INICIO_DT'] = pd.to_datetime(df_financeiro['_HORA_INICIO_DT'])
+        df_financeiro['_HORA_FIM_DT'] = pd.to_datetime(df_financeiro['_HORA_FIM_DT'])
+        
+        custo_total_mao_de_obra = 0.0
+        horas_totais = 0.0
+        
+        for (eq, periodo_f), group in df_financeiro.groupby(['BASE_ATRIBUIDA', 'PERIODO']):
+            h_inicio = group['_HORA_INICIO_DT'].min()
+            h_fim = group['_HORA_FIM_DT'].max()
+            h_trab = (h_fim - h_inicio).total_seconds() / 3600.0
+            horas_totais += h_trab
+            custo_total_mao_de_obra += (h_trab * cf_hora)
+            
+        custo_operacao_total = custo_total_combustivel + custo_total_mao_de_obra
+        custo_por_obra = custo_operacao_total / tot_obras if tot_obras > 0 else 0.0
+
+        c_fin1, c_fin2, c_fin3, c_fin4 = st.columns(4)
+        c_fin1.markdown(f'<div class="metric-card" style="border-left: 5px solid #f59e0b;"><div class="metric-icon" style="background: rgba(245, 158, 11, 0.15);">⛽</div><div class="metric-content"><div class="metric-title">Combustível Estimado</div><div class="metric-value">R$ {formatar_moeda(custo_total_combustivel)}</div></div></div>', unsafe_allow_html=True)
+        c_fin2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👷</div><div class="metric-content"><div class="metric-title">Mão de Obra ({horas_totais:.1f}h)</div><div class="metric-value">R$ {formatar_moeda(custo_total_mao_de_obra)}</div></div></div>', unsafe_allow_html=True)
+        c_fin3.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">💲</div><div class="metric-content"><div class="metric-title">Custo Total Operação</div><div class="metric-value">R$ {formatar_moeda(custo_operacao_total)}</div></div></div>', unsafe_allow_html=True)
+        c_fin4.markdown(f'<div class="metric-card" style="border-left: 5px solid #10b981;"><div class="metric-icon" style="background: rgba(16, 185, 129, 0.15);">📊</div><div class="metric-content"><div class="metric-title">Custo Médio por Obra</div><div class="metric-value">R$ {formatar_moeda(custo_por_obra)}</div></div></div>', unsafe_allow_html=True)
 
         st.markdown("---")
         
@@ -1036,11 +1093,11 @@ def view_roteirizador():
         if not df_status_upload.empty and coluna_status_selecionada:
             df_tasks = atualizar_status_via_df(df_tasks, df_status_upload, coluna_status_selecionada)
 
-    # === DATA PROFILING (RAIO-X DE DADOS) ===
+    # === DATA PROFILING (RAIO-X DE DADOS E GEOCODING) ===
     st.markdown("---")
     
-    if 'LATITUDE' not in df_tasks.columns or 'LONGITUDE' not in df_tasks.columns:
-        st.error("❌ A planilha precisa ter LATITUDE e LONGITUDE."); return
+    if 'LATITUDE' not in df_tasks.columns: df_tasks['LATITUDE'] = np.nan
+    if 'LONGITUDE' not in df_tasks.columns: df_tasks['LONGITUDE'] = np.nan
 
     if 'STATUS LIST' in df_tasks.columns:
         df_tasks['STATUS_LIMPO'] = df_tasks['STATUS LIST'].astype(str).str.strip().str.upper()
@@ -1053,9 +1110,45 @@ def view_roteirizador():
     df_tasks['LATITUDE'] = pd.to_numeric(df_tasks['LATITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
     df_tasks['LONGITUDE'] = pd.to_numeric(df_tasks['LONGITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
     
-    erros_coords = df_tasks['LATITUDE'].isna() | df_tasks['LONGITUDE'].isna() | (df_tasks['LATITUDE'] == 0.0)
-    qtd_erros_coords = erros_coords.sum()
-    df_tasks = df_tasks[~erros_coords]
+    erros_coords_mask = df_tasks['LATITUDE'].isna() | df_tasks['LONGITUDE'].isna() | (df_tasks['LATITUDE'] == 0.0) | (df_tasks['LONGITUDE'] == 0.0)
+    qtd_erros_iniciais = erros_coords_mask.sum()
+    
+    # MUDANÇA 2: Resgate de Coordenadas (Geocoding)
+    if qtd_erros_iniciais > 0:
+        col_end = 'ENDERECO' if 'ENDERECO' in df_tasks.columns else ('RUA' if 'RUA' in df_tasks.columns else None)
+        col_mun = 'MUNICIPIO' if 'MUNICIPIO' in df_tasks.columns else ('CIDADE' if 'CIDADE' in df_tasks.columns else None)
+        
+        if col_end and col_mun:
+            st.info(f"🔍 Detectadas {qtd_erros_iniciais} obras sem coordenadas válidas. Iniciando resgate automático de satélite... Isso pode levar alguns instantes.")
+            my_bar = st.progress(0.0)
+            
+            df_erros = df_tasks[erros_coords_mask].copy()
+            df_ok = df_tasks[~erros_coords_mask].copy()
+            
+            lats, lons = [], []
+            for i, row in enumerate(df_erros.itertuples()):
+                end_val = getattr(row, col_end)
+                mun_val = getattr(row, col_mun)
+                lat, lon = geocode_endereco_nominatim(end_val, mun_val)
+                lats.append(lat)
+                lons.append(lon)
+                time.sleep(0.6) 
+                my_bar.progress((i + 1) / qtd_erros_iniciais)
+                
+            df_erros['LATITUDE'] = lats
+            df_erros['LONGITUDE'] = lons
+            my_bar.empty()
+            
+            ainda_com_erro = df_erros['LATITUDE'].isna() | df_erros['LONGITUDE'].isna() | (df_erros['LATITUDE'] == 0.0)
+            resgatadas = (~ainda_com_erro).sum()
+            if resgatadas > 0:
+                st.success(f"🛰️ Sucesso! {resgatadas} coordenadas recuperadas no mapa. Elas foram incluídas no roteamento.")
+            
+            df_tasks = pd.concat([df_ok, df_erros[~ainda_com_erro]])
+            erros_coords_mask = df_tasks['LATITUDE'].isna() | df_tasks['LONGITUDE'].isna() | (df_tasks['LATITUDE'] == 0.0)
+            
+    qtd_erros_coords_finais = erros_coords_mask.sum()
+    df_tasks = df_tasks[~erros_coords_mask]
     
     erros_nome = 0
     for col_nome in ['NOME', 'NOME DO SOLICITANTE', 'CLIENTE']:
@@ -1072,7 +1165,7 @@ def view_roteirizador():
     st.markdown(f"""
     <div class="profiling-box">
         <b>Análise Estrutural:</b> Das {total_obras_inicial} linhas encontradas, o sistema filtrou e aprovou <b>{len(df_tasks)} obras válidas</b> para roteamento. <br>
-        <i>(Omitidos: {qtd_erros_coords} sem coordenadas ou zeradas | {erros_nome} sem nome de cliente | Restante fora do status padrão).</i>
+        <i>(Omitidos: {qtd_erros_coords_finais} sem coordenadas resolvíveis | {erros_nome} sem nome de cliente | Restante fora do status padrão).</i>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1215,6 +1308,12 @@ def view_roteirizador():
         st.session_state.tipo_periodo = tipo_periodo
         st.session_state.colunas_exibir = colunas_exibir
         st.session_state.col_prioridade = col_prioridade
+        
+        st.session_state.config_financeira = {
+            'custo_combustivel': custo_combustivel,
+            'consumo_veiculo': consumo_veiculo,
+            'custo_hora_equipe': custo_hora_equipe
+        }
         
         st.session_state.vrp_state = {
             'config': {
