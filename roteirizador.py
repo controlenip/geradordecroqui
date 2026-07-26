@@ -214,7 +214,6 @@ def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg, url_osrm_bas
     demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
     routing.AddDimensionWithVehicleCapacity(demand_callback_index, 0, capacities, True, 'Capacity')
 
-    # CORREÇÃO CRÍTICA: Aplica multa de 50.000.000 para notas PRIORITÁRIAS, forçando a IA a roteirizá-las
     for idx, r in enumerate(lista_obras):
         node_index = manager.NodeToIndex(idx + 1)
         penalty = 50000000 if r.get('PRIORIDADE') == 'Sim' else 10000000
@@ -1074,6 +1073,15 @@ def view_roteirizador():
     if len(todas_bases_records) > 0:
         df_tasks['BASE_ATRIBUIDA'] = "NÃO ALOCADO"
         
+        # MUDANÇA: Isolamento de Prioridades (Blindagem para Temporários)
+        df_tasks['COORD_KEY'] = df_tasks['LATITUDE'].astype(str) + "_" + df_tasks['LONGITUDE'].astype(str)
+        coords_com_prio = df_tasks[df_tasks['PRIORIDADE'] == 'Sim']['COORD_KEY'].unique()
+        
+        df_tasks['PRECISA_PRINCIPAL'] = df_tasks['COORD_KEY'].isin(coords_com_prio)
+        
+        df_prio_e_agregadas = df_tasks[df_tasks['PRECISA_PRINCIPAL']].copy()
+        df_comum_puro = df_tasks[~df_tasks['PRECISA_PRINCIPAL']].copy()
+        
         if tipo_atribuicao == "Clusterização Inteligente por IA (K-Means)":
             def allocate_kmeans(df_subset, base_list):
                 if df_subset.empty or not base_list: return df_subset
@@ -1103,7 +1111,9 @@ def view_roteirizador():
                         df_subset.loc[idx, 'BASE_ATRIBUIDA'] = best_b
                 return df_subset
 
-            df_tasks = allocate_kmeans(df_tasks, todas_bases_records)
+            df_prio_e_agregadas = allocate_kmeans(df_prio_e_agregadas, bases_principais_records)
+            df_comum_puro = allocate_kmeans(df_comum_puro, todas_bases_records)
+            df_tasks = pd.concat([df_prio_e_agregadas, df_comum_puro])
 
         elif tipo_atribuicao == "Por Proximidade Geográfica das Coordenadas (Ignora texto)":
             def get_nearest_base(lat, lon, base_list):
@@ -1115,9 +1125,12 @@ def view_roteirizador():
                         if d < min_dist: min_dist, best_base = d, b['LEVANTADOR']
                 return best_base if best_base else "NÃO ALOCADO"
                 
-            df_tasks['BASE_ATRIBUIDA'] = df_tasks.apply(lambda r: get_nearest_base(r['LATITUDE'], r['LONGITUDE'], todas_bases_records), axis=1)
+            df_prio_e_agregadas['BASE_ATRIBUIDA'] = df_prio_e_agregadas.apply(lambda r: get_nearest_base(r['LATITUDE'], r['LONGITUDE'], bases_principais_records), axis=1)
+            df_comum_puro['BASE_ATRIBUIDA'] = df_comum_puro.apply(lambda r: get_nearest_base(r['LATITUDE'], r['LONGITUDE'], todas_bases_records), axis=1)
+            df_tasks = pd.concat([df_prio_e_agregadas, df_comum_puro])
 
         elif tipo_atribuicao == "Por Municípios Atendidos (Lê texto da planilha)":
+            mun_to_main = {}
             mun_to_all = {}
             for b in todas_bases_records:
                 for m in str(b.get('MUNICIPIO', '')).split(','):
@@ -1125,6 +1138,9 @@ def view_roteirizador():
                     if m_limpo:
                         if m_limpo not in mun_to_all: mun_to_all[m_limpo] = []
                         mun_to_all[m_limpo].append(b['LEVANTADOR'])
+                        if b.get('TIPO_EQUIPE') == 'PRINCIPAL':
+                            if m_limpo not in mun_to_main: mun_to_main[m_limpo] = []
+                            mun_to_main[m_limpo].append(b['LEVANTADOR'])
             
             def allocate_by_mun_divided(df_sub, map_dict):
                 if df_sub.empty: return df_sub
@@ -1147,8 +1163,12 @@ def view_roteirizador():
                                 df_sub.loc[group.index, 'BASE_ATRIBUIDA'] = bases_disp[0]
                 return df_sub.drop(columns=['MUN_LIMPO'])
                 
-            df_tasks = allocate_by_mun_divided(df_tasks, mun_to_all)
+            df_prio_e_agregadas = allocate_by_mun_divided(df_prio_e_agregadas, mun_to_main)
+            df_comum_puro = allocate_by_mun_divided(df_comum_puro, mun_to_all)
+            df_tasks = pd.concat([df_prio_e_agregadas, df_comum_puro])
 
+        df_tasks = df_tasks.drop(columns=['COORD_KEY', 'PRECISA_PRINCIPAL'])
+        
         df_unallocated = df_tasks[df_tasks['BASE_ATRIBUIDA'] == "NÃO ALOCADO"]
         df_tasks_alocadas = df_tasks[df_tasks['BASE_ATRIBUIDA'] != "NÃO ALOCADO"].copy()
 
