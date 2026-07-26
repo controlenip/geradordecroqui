@@ -125,11 +125,11 @@ st.markdown("""
     @media (prefers-color-scheme: dark) {
         .stepper-container { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.1); }
         .metric-card { 
-            background: #262730; /* Fundo acinzentado nativo do Streamlit */
-            border-color: #333c47; 
+            background: #363945; /* Fundo acinzentado mais claro para destacar da tela */
+            border-color: #454a59; 
             box-shadow: 0 4px 10px rgba(0,0,0,0.2); 
         }
-        .metric-content .metric-title { color: #a0aab5; }
+        .metric-content .metric-title { color: #b3bdc8; }
         .metric-content .metric-value { color: #ffffff; }
     }
 </style>
