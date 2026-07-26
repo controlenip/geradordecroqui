@@ -325,7 +325,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
                     
     return buf_xl.getvalue()
 
-def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_todas_bases=None):
+def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_todas_bases=None, tipo_periodo="Dia"):
     if lista_todas_bases is None:
         lista_todas_bases = df_rota['BASE_ATRIBUIDA'].unique().tolist()
         
@@ -370,24 +370,48 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                 kml += f'      <Folder>\n        <name>Dia {dia}</name>\n'
 
                 coords_linha_kml = ""
-                for _, row in df_dia.iterrows():
-                    lon, lat = str(row['LONGITUDE']).replace(',','.'), str(row['LATITUDE']).replace(',','.')
-                    desc_parts = [f"<b>Ordem na Rota:</b> {row.get('ORDEM', 0)}", f"<b>Distância Anterior:</b> {row.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM"]
+                for _, r in df_dia.iterrows():
+                    lon, lat = str(r['LONGITUDE']).replace(',','.'), str(r['LATITUDE']).replace(',','.')
                     
-                    if row.get('PROTOCOLO') == 'RETORNO_BASE':
-                        desc_cdata, nome_ponto, style_url = "<b>RETORNO À BASE DE ORIGEM</b>", "🏠 FIM DO DIA - RETORNO", "#icon-green"
-                    elif row.get('PROTOCOLO') == 'PAUSA_ALMOCO':
-                        desc_cdata, nome_ponto, style_url = "<b>PAUSA PROGRAMADA PARA REFEIÇÃO (1h)</b>", "🍔 ALMOÇO DA EQUIPE", "#icon-yellow"
+                    if r.get('PROTOCOLO') == 'RETORNO_BASE':
+                        nome_ponto, style_url = "🏠 FIM DO DIA - RETORNO", "#icon-green"
+                        popup_html = "<b>RETORNO À BASE DE ORIGEM</b>"
+                    elif r.get('PROTOCOLO') == 'PAUSA_ALMOCO':
+                        nome_ponto, style_url = "🍔 ALMOÇO DA EQUIPE", "#icon-yellow"
+                        popup_html = "<b>PAUSA PROGRAMADA PARA REFEIÇÃO (1h)</b>"
                     else:
-                        for col in cols_exibir:
-                            if col in row: desc_parts.append(f"<b>{col}:</b> {html.escape(str(row[col]))}")
-                        desc_cdata = "<br>".join(desc_parts)
-                        nome_ponto = f"[{row.get('ORDEM', 0)}] Prot: {html.escape(str(row.get('PROTOCOLO', 'N/A')))}"
-                        style_url = "#icon-red" if row.get('PRIORIDADE') == "Sim" else "#icon-blue"
+                        pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0070C0"
+                        pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
+                        
+                        extra_rows = ""
+                        for c in cols_exibir:
+                            if c in r: extra_rows += f"<tr><td style='padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;'>{html.escape(str(c))}:</td><td style='padding:4px 8px; color:#222; border-bottom:1px solid #eee;'>{html.escape(str(r[c]))}</td></tr>"
 
-                    kml += f'        <Placemark><name>{nome_ponto}</name><description><![CDATA[{desc_cdata}]]></description><styleUrl>{style_url}</styleUrl><Point><coordinates>{lon},{lat},0</coordinates></Point></Placemark>\n'
-                    if isinstance(row.get('ROTA_GEOMETRIA'), list):
-                        coords_linha_kml += "".join([f"          {pt_lon},{pt_lat},0\n" for pt_lon, pt_lat in row['ROTA_GEOMETRIA']])
+                        popup_html = f"""
+                        <div style="font-family: Arial, sans-serif; width:300px; border-radius:6px; overflow:hidden; border:1px solid #ccc; background:#fff;">
+                            <div style="background:{pop_header_bg}; color:white; padding:10px; font-size:14px; font-weight:bold; text-align:center;">
+                                {pop_prio_txt}
+                            </div>
+                            <div style="padding:10px; background:#fafafa; font-size:13px;">
+                                <table style="width:100%; border-collapse:collapse; text-align:left;">
+                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; width:40%;">Protocolo:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{html.escape(str(r.get('PROTOCOLO', 'N/A')))}</td></tr>
+                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Ordem:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
+                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Ant.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Tempo Est.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('TEMPO_VIAGEM_MINUTOS', 0)} Min</td></tr>
+                                    {extra_rows}
+                                </table>
+                            </div>
+                        </div>
+                        """
+                        
+                        tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
+                        nome_ponto = f"{tag_prio}[{r.get('ORDEM', 0)}] Prot: {html.escape(str(r.get('PROTOCOLO', 'N/A')))}"
+                        style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
+
+                    kml += f'        <Placemark><name>{nome_ponto}</name><description><![CDATA[{popup_html}]]></description><styleUrl>{style_url}</styleUrl><Point><coordinates>{lon},{lat},0</coordinates></Point></Placemark>\n'
+                    
+                    if isinstance(r.get('ROTA_GEOMETRIA'), list):
+                        coords_linha_kml += "".join([f"          {pt_lon},{pt_lat},0\n" for pt_lon, pt_lat in r['ROTA_GEOMETRIA']])
                     else:
                         coords_linha_kml += f"          {lon},{lat},0\n"
 
@@ -472,7 +496,6 @@ def view_roteirizador():
         st.markdown("## 🎯 Resultados da Roteirização Corporativa")
         st.info("Dê um **duplo clique** nas células abaixo para alterar o responsável ou a ordem das obras.")
         
-        # === RESTAURAÇÃO DA COLUNA DISTANCIA PROXIMO PONTO NO EDITOR ===
         df_editado_ui = st.data_editor(
             st.session_state.df_routed, use_container_width=True,
             column_config={ 
@@ -513,7 +536,6 @@ def view_roteirizador():
             st.bar_chart(df_routed.groupby('BASE_ATRIBUIDA')['DISTANCIA_PONTO_ANTERIOR_KM'].sum(), color="#FF4B4B")
         st.markdown("---")
         
-        # === RESTAURAÇÃO DO MAPA FOLIUM COM POP-UPS ===
         st.markdown("#### 🗺️ Visualização Geográfica do Plano")
         mapa = folium.Map(location=[df_routed['LATITUDE'].mean(), df_routed['LONGITUDE'].mean()], zoom_start=8) if not df_routed.empty else folium.Map(location=[-5.2, -45.0], zoom_start=7)
         
@@ -556,19 +578,19 @@ def view_roteirizador():
                     
                     extra_rows = ""
                     for c in colunas_exibir:
-                        if c in r: extra_rows += f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>{c}:</td><td style='padding:3px 6px; color:#333;'>{r[c]}</td></tr>"
+                        if c in r: extra_rows += f"<tr><td style='padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;'>{html.escape(str(c))}:</td><td style='padding:4px 8px; color:#222; border-bottom:1px solid #eee;'>{html.escape(str(r[c]))}</td></tr>"
 
                     popup_html = f"""
-                    <div style="font-family:sans-serif; width:260px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
-                        <div style="background:{pop_header_bg}; color:white; padding:8px 10px; font-size:13px; font-weight:bold;">
+                    <div style="font-family: Arial, sans-serif; width:300px; border-radius:6px; overflow:hidden; border:1px solid #ccc; background:#fff;">
+                        <div style="background:{pop_header_bg}; color:white; padding:10px; font-size:14px; font-weight:bold; text-align:center;">
                             {pop_prio_txt}
                         </div>
-                        <div style="padding:10px; background:#fafafa; font-size:12px;">
-                            <table style="width:100%; border-collapse:collapse;">
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Protocolo:</td><td style="padding:3px 6px; color:#333;">{r.get('PROTOCOLO', 'N/A')}</td></tr>
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Tempo Est.:</td><td style="padding:3px 6px; color:#333;">{r.get('TEMPO_VIAGEM_MINUTOS', 0)} Min</td></tr>
+                        <div style="padding:10px; background:#fafafa; font-size:13px;">
+                            <table style="width:100%; border-collapse:collapse; text-align:left;">
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; width:40%;">Protocolo:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{html.escape(str(r.get('PROTOCOLO', 'N/A')))}</td></tr>
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Ordem:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Ant.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Tempo Est.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('TEMPO_VIAGEM_MINUTOS', 0)} Min</td></tr>
                                 {extra_rows}
                             </table>
                         </div>
@@ -615,11 +637,11 @@ def view_roteirizador():
         buf_zip_kml = io.BytesIO()
         with zipfile.ZipFile(buf_zip_kml, 'w', zipfile.ZIP_DEFLATED) as zip_kml:
             lista_bases_geral = df_routed['BASE_ATRIBUIDA'].unique().tolist()
-            zip_kml.writestr(f"Rota_Geral_{data_atual}.kml", gerar_kml_agrupado(df_routed, bases_records, f"Rota_Geral_{data_atual}", st.session_state.colunas_exibir, lista_bases_geral).encode('utf-8'))
+            zip_kml.writestr(f"Rota_Geral_{data_atual}.kml", gerar_kml_agrupado(df_routed, bases_records, f"Rota_Geral_{data_atual}", st.session_state.colunas_exibir, lista_bases_geral, tipo_periodo).encode('utf-8'))
             for base_nome in df_routed['BASE_ATRIBUIDA'].unique():
                 df_lev = df_routed[df_routed['BASE_ATRIBUIDA'] == base_nome].copy()
                 nome_seguro = re.sub(r'[^A-Za-z0-9_]', '', str(base_nome).replace(" ", "_"))
-                zip_kml.writestr(f"Rota_{nome_seguro}_{data_atual}.kml", gerar_kml_agrupado(df_lev, bases_records, f"Rota_{nome_seguro}", st.session_state.colunas_exibir, lista_bases_geral).encode('utf-8'))
+                zip_kml.writestr(f"Rota_{nome_seguro}_{data_atual}.kml", gerar_kml_agrupado(df_lev, bases_records, f"Rota_{nome_seguro}", st.session_state.colunas_exibir, lista_bases_geral, tipo_periodo).encode('utf-8'))
 
         col_b1, col_b2, col_b3 = st.columns([1, 1, 1])
         col_b1.download_button("🌐 1. Planilhas Roteirizadas (ZIP)", data=buf_zip_xl.getvalue(), file_name=f"Dados_Estruturados_Roteiro_{data_atual}.zip", mime="application/zip", use_container_width=True)
@@ -700,7 +722,6 @@ def view_roteirizador():
         if state['b_idx'] >= len(state['b_names']):
             status_text.success("✅ Otimização Concluída!")
             
-            # === RESTAURAÇÃO DO CÁLCULO DA DISTÂNCIA PARA O PRÓXIMO PONTO ===
             df_final_route = pd.DataFrame(state['routed_data'])
             if not df_final_route.empty:
                 df_final_route['DISTANCIA_PROXIMO_PONTO_KM'] = df_final_route.groupby(['BASE_ATRIBUIDA', 'PERIODO'])['DISTANCIA_PONTO_ANTERIOR_KM'].shift(-1).fillna(0.0)
