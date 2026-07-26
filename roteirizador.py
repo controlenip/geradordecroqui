@@ -156,7 +156,6 @@ def calcular_matriz_distancias_numpy(coords):
     return (R * c).astype(int)
 
 def obter_matriz_osrm(coords, url_osrm_base):
-    """MUDANÇA 1: Solicita Tabela Asfaltada do OSRM. Falha graciosamente se houver limite público."""
     if len(coords) > 100 and 'project-osrm' in url_osrm_base:
         return None
         
@@ -242,12 +241,14 @@ def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg, url_osrm_bas
     return rotas_por_periodo
 
 def kmeans_clustering(coords, k, max_iters=100):
+    """Agrupamento Geográfico. Separa pontos próximos em K grupos (Zonas)."""
     np.random.seed(42)
     unique_coords = np.unique(coords, axis=0)
     if len(unique_coords) < k: k = len(unique_coords)
+    if k == 0: return np.zeros(len(coords)), []
     indices = np.random.choice(len(unique_coords), k, replace=False)
     centroids = unique_coords[indices]
-    labels = np.zeros(len(coords))
+    labels = np.zeros(len(coords), dtype=int)
     for _ in range(max_iters):
         diff = coords[:, np.newaxis, :] - centroids[np.newaxis, :, :]
         dists = np.linalg.norm(diff, axis=2)
@@ -577,7 +578,6 @@ def view_roteirizador():
 
         st.markdown("---")
         
-        # === MUDANÇA 4: GRÁFICO DE GANTT INTERATIVO ===
         st.markdown("### ⏱️ Timeline de Produtividade (Gantt)")
         df_gantt = df_routed.copy()
         
@@ -596,7 +596,7 @@ def view_roteirizador():
         
         periodos_disp = sorted(df_gantt['PERIODO'].unique())
         if periodos_disp:
-            p_sel = st.selectbox("Selecione o Período para analisar o preenchimento da agenda:", periodos_disp)
+            p_sel = st.selectbox("Selecione o Período para analisar a agenda:", periodos_disp)
             df_plot = df_gantt[df_gantt['PERIODO'] == p_sel]
             
             fig = px.timeline(
@@ -800,7 +800,6 @@ def view_roteirizador():
             if obras_equipe:
                 rotas_resolvidas = roteirizar_equipe_ortools(obras_equipe, base_lat, base_lon, cfg, url_osrm_base)
                 
-                # MUDANÇA 2: PREPARAÇÃO PARA PARALELISMO DE REDE
                 rotas_flat = []
                 for idx_periodo, rota_dia in enumerate(rotas_resolvidas):
                     periodo = idx_periodo + 1
@@ -820,7 +819,6 @@ def view_roteirizador():
                         'periodo': periodo, 'is_retorno': True
                     })
 
-                # MUDANÇA 2: FETCH ASSÍNCRONO COM THREADS (10 requisições simultâneas)
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     geoms_and_durs = list(executor.map(fetch_geom_wrapper, rotas_flat))
                     
@@ -832,13 +830,11 @@ def view_roteirizador():
                 for item, (geom, dur_sec) in zip(rotas_flat, geoms_and_durs):
                     if item['periodo'] != current_periodo:
                         current_periodo = item['periodo']
-                        # MUDANÇA 4: Inicia a agenda diária simulando as 08:00 AM
                         current_time = pd.to_datetime(f'2026-01-{current_periodo:02d} 08:00:00')
                         lunch_added = False
                     
                     viagem_min = dur_sec / 60.0
                     
-                    # Injeção Automática de Almoço caso cruze as 12:00
                     if current_time.hour >= 12 and not lunch_added and not item['is_retorno']:
                         lunch_start = current_time
                         lunch_end = current_time + pd.Timedelta(hours=1)
@@ -1148,8 +1144,17 @@ def view_roteirizador():
                     bases_disp = map_dict.get(mun, [])
                     if bases_disp:
                         n_bases = len(bases_disp)
-                        assigned = [bases_disp[i % n_bases] for i in range(len(group))]
-                        df_sub.loc[group.index, 'BASE_ATRIBUIDA'] = assigned
+                        if n_bases == 1:
+                            df_sub.loc[group.index, 'BASE_ATRIBUIDA'] = bases_disp[0]
+                        else:
+                            # MUDANÇA: Micro-Zoneamento Geográfico usando IA (K-Means)
+                            coords = group[['LATITUDE', 'LONGITUDE']].values
+                            k_real = min(n_bases, len(np.unique(coords, axis=0)))
+                            if k_real > 1:
+                                labels, _ = kmeans_clustering(coords, k_real)
+                                df_sub.loc[group.index, 'BASE_ATRIBUIDA'] = [bases_disp[lbl % n_bases] for lbl in labels]
+                            else:
+                                df_sub.loc[group.index, 'BASE_ATRIBUIDA'] = bases_disp[0]
                 return df_sub.drop(columns=['MUN_LIMPO'])
                 
             df_prio = allocate_by_mun_divided(df_prio, mun_to_main)
