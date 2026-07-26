@@ -305,6 +305,37 @@ def view_roteirizador():
     if "col_prioridade" not in st.session_state: st.session_state.col_prioridade = "TIPO NOTA"
     if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
 
+    # =============================================================
+    # SIDEBAR: CONFIGURAÇÕES CONSTANTES (E TIMER)
+    # =============================================================
+    # Bloqueia a edição da barra se o sistema estiver rodando ou concluído
+    is_locked = st.session_state.vrp_status != "IDLE" or st.session_state.roteamento_concluido
+    
+    with st.sidebar:
+        st.markdown("### ⚙️ Gestão de Esforço Diário")
+        tipo_periodo = st.radio("Como agrupar o roteiro?", ["Dia", "Semana"], horizontal=True, disabled=is_locked)
+        modo_limite = st.radio("Critério limitador da equipe:", ["Quantidade Fixa de Obras", "Carga Horária (Tempo Real via Satélite)"], disabled=is_locked)
+        
+        limite_km_diario = st.slider(f"Limite Máximo de KM por {tipo_periodo}", min_value=0, max_value=500, value=500, step=5, disabled=is_locked)
+        
+        obras_por_periodo = 10
+        horas_por_dia = 8.0
+        tempo_medio_obra = 1.5
+        velocidade_media_kmh = 30.0
+        
+        if modo_limite == "Quantidade Fixa de Obras":
+            obras_por_periodo = st.number_input(f"Máximo de Obras por {tipo_periodo}", min_value=1, value=10, step=1, disabled=is_locked)
+            limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s a roteirizar", min_value=1, value=5, step=1, disabled=is_locked)
+        else:
+            horas_por_dia = st.number_input(f"Horas de trabalho disponíveis por {tipo_periodo}", min_value=1.0, value=8.0, step=0.5, disabled=is_locked)
+            tempo_medio_obra = st.number_input("Tempo médio de execução por obra (Horas)", min_value=0.1, value=1.5, step=0.1, disabled=is_locked)
+            velocidade_media_kmh = st.number_input("Velocidade (Plano B de Conexão) (km/h)", min_value=10.0, value=30.0, step=5.0, disabled=is_locked)
+            limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s a roteirizar", min_value=1, value=5, step=1, disabled=is_locked)
+            
+        st.markdown("---")
+        # Espaço reservado para o Timer (Só aparece durante a execução)
+        timer_placeholder = st.empty()
+
     # -------------------------------------------------------------
     # 1. TELA DE RESULTADOS (Após Roteirização Finalizada)
     # -------------------------------------------------------------
@@ -461,7 +492,7 @@ def view_roteirizador():
         st.markdown("## 🚀 Execução do Motor de Roteirização")
         st.markdown("O sistema está conectando via satélite para agrupar e traçar os percursos.")
         
-        c1, c2, c3 = st.columns([1, 1, 2])
+        c1, c2 = st.columns(2)
         if st.session_state.vrp_status == "RUNNING":
             if c1.button("⏸️ Pausar Roteirização", use_container_width=True):
                 st.session_state.vrp_status = "PAUSED"
@@ -483,19 +514,31 @@ def view_roteirizador():
         
         st.progress(progresso)
         
+        # === CÁLCULO E EXIBIÇÃO DO TIMER NA BARRA LATERAL ===
+        if state['obras_processadas'] > 0:
+            avg = state['tempo_processamento'] / state['obras_processadas']
+            restantes = total - state['obras_processadas']
+            est_rem = avg * restantes
+            m, s = divmod(int(est_rem), 60)
+            h, m = divmod(m, 60)
+            time_str = f"{h:02d}h {m:02d}m {s:02d}s" if h > 0 else f"{m:02d}m {s:02d}s"
+            
+            with timer_placeholder.container():
+                st.markdown("### ⏱️ Tempo Restante")
+                if st.session_state.vrp_status == "PAUSED":
+                    st.warning(f"⏸️ **Pausado**\n\nFaltavam {time_str}")
+                else:
+                    st.success(f"⏳ **{time_str}**")
+        else:
+            with timer_placeholder.container():
+                st.markdown("### ⏱️ Tempo Restante")
+                st.info("⏳ Calculando estimativa...")
+        
+        # === FLUXO DE EXECUÇÃO ===
         if st.session_state.vrp_status == "RUNNING":
             agora = time.time()
             state['tempo_processamento'] += (agora - state['last_time'])
             state['last_time'] = agora
-            
-            if state['obras_processadas'] > 0:
-                avg = state['tempo_processamento'] / state['obras_processadas']
-                restantes = total - state['obras_processadas']
-                est_rem = avg * restantes
-                m, s = divmod(int(est_rem), 60)
-                h, m = divmod(m, 60)
-                if h > 0: c3.markdown(f"⏳ **Conclusão em aprox:** {h:02d}h {m:02d}m {s:02d}s")
-                else: c3.markdown(f"⏳ **Conclusão em aprox:** {m:02d}m {s:02d}s")
             
             status_text = st.empty()
             df_todas_bases_ativas = pd.DataFrame(st.session_state.bases_records)
@@ -696,30 +739,6 @@ def view_roteirizador():
     # -------------------------------------------------------------
     # 3. TELA DE CONFIGURAÇÃO INICIAL (Uploads e Ajustes)
     # -------------------------------------------------------------
-    st.markdown("## 🚙 Roteirizador Operacional Avançado")
-    st.markdown("Planeje rotas inteligentes integradas a controles de esforço e retorno à base.")
-
-    with st.sidebar:
-        st.markdown("### ⚙️ Gestão de Esforço Diário")
-        tipo_periodo = st.radio("Como agrupar o roteiro?", ["Dia", "Semana"], horizontal=True)
-        modo_limite = st.radio("Critério limitador da equipe:", ["Quantidade Fixa de Obras", "Carga Horária (Tempo Real via Satélite)"])
-        
-        limite_km_diario = st.slider(f"Limite Máximo de KM por {tipo_periodo}", min_value=0, max_value=500, value=500, step=5)
-        
-        obras_por_periodo = 10
-        horas_por_dia = 8.0
-        tempo_medio_obra = 1.5
-        velocidade_media_kmh = 30.0
-        
-        if modo_limite == "Quantidade Fixa de Obras":
-            obras_por_periodo = st.number_input(f"Máximo de Obras por {tipo_periodo}", min_value=1, value=10, step=1)
-            limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s a roteirizar", min_value=1, value=5, step=1)
-        else:
-            horas_por_dia = st.number_input(f"Horas de trabalho disponíveis por {tipo_periodo}", min_value=1.0, value=8.0, step=0.5)
-            tempo_medio_obra = st.number_input("Tempo médio de execução por obra (Horas)", min_value=0.1, value=1.5, step=0.1)
-            velocidade_media_kmh = st.number_input("Velocidade (Plano B de Conexão) (km/h)", min_value=10.0, value=30.0, step=5.0)
-            limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s a roteirizar", min_value=1, value=5, step=1)
-
     col_up_1, col_up_2 = st.columns(2)
 
     with col_up_1:
@@ -846,13 +865,10 @@ def view_roteirizador():
 
     st.markdown("---")
     
-    # === SELEÇÃO INTERATIVA DE STATUS (NOVO FILTRO) ===
+    # === SELEÇÃO INTERATIVA DE STATUS ===
     if 'STATUS LIST' in df_tasks.columns:
-        # Pega todos os status únicos presentes na planilha enviada
         df_tasks['STATUS_LIMPO'] = df_tasks['STATUS LIST'].astype(str).str.strip().str.upper()
         status_unicos = sorted(df_tasks['STATUS_LIMPO'].unique().tolist())
-        
-        # Mantém como padrão apenas os que realmente existem no arquivo para evitar erros
         padroes_ativos = [s for s in status_unicos if s in STATUS_PADRAO]
         
         status_selecionados = st.multiselect(
@@ -865,11 +881,10 @@ def view_roteirizador():
             st.warning("⚠️ Você precisa selecionar pelo menos um status para prosseguir.")
             return
             
-        # Filtra a planilha mantendo APENAS o que o usuário deixou selecionado no campo
         df_tasks = df_tasks[df_tasks['STATUS_LIMPO'].isin(status_selecionados)]
-        df_tasks = df_tasks.drop(columns=['STATUS_LIMPO']) # Limpa a coluna temporária
+        df_tasks = df_tasks.drop(columns=['STATUS_LIMPO'])
 
-    # === LIMPEZA DE BASE (LAT/LON E OUTROS CAMPOS) ===
+    # === LIMPEZA DE BASE ===
     total_orig = len(df_tasks)
     df_tasks['LATITUDE'] = pd.to_numeric(df_tasks['LATITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
     df_tasks['LONGITUDE'] = pd.to_numeric(df_tasks['LONGITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
@@ -1011,7 +1026,7 @@ def view_roteirizador():
 
             todas_cols = df_tasks_alocadas.columns.tolist()
             
-            cols_desejadas = ['PROTOCOLO', 'NOME', 'ENDEREÇO', 'MUNICIPIO', 'INFORMAÇÕES EXTRAS', 'LATITUDE', 'LONGITUDE']
+            cols_desejadas = ['PROTOCOLO', 'NOME', 'ENDEREÇO', 'MUNICIPIO', 'INFORMAÇÕES EXTRAS', 'LATITUDE', 'LONGITUDE', 'TIPO NOTA']
             cols_desejadas_norm = normalize_cols(cols_desejadas)
             cols_padrao = [c for c in cols_desejadas_norm if c in todas_cols]
             
@@ -1027,6 +1042,9 @@ def view_roteirizador():
         if df_tasks_alocadas.empty:
             st.error("Selecione equipes e regras compatíveis com a planilha primeiro.")
             return
+
+        if 'TIPO NOTA' in df_tasks_alocadas.columns and 'TIPO NOTA' not in colunas_exibir:
+            colunas_exibir.append('TIPO NOTA')
 
         st.session_state.bases_records = bases_records
         st.session_state.tipo_periodo = tipo_periodo
