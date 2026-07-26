@@ -168,7 +168,6 @@ def obter_matriz_osrm(coords, url_osrm_base):
     return None
 
 def resolver_tsp_ortools(lista_obras, base_lat, base_lon, url_osrm_base):
-    """MUDANÇA 1: Roteiriza uma sequência inquebrável (Prioridades 1º, Comuns Depois)"""
     if not lista_obras: return []
     coords_array = np.array([(base_lat, base_lon)] + [(r['LATITUDE'], r['LONGITUDE']) for r in lista_obras])
     
@@ -472,7 +471,6 @@ def view_roteirizador():
         
         limite_km_diario = st.slider(f"Limite de KM por {tipo_periodo}", 0, 500, 500, 5, disabled=is_locked)
         
-        # MUDANÇA 3: Padrão alterado de 10 para 4 obras conforme o limite diário da Progeo
         obras_por_periodo = 4
         horas_por_dia = 8.0
         tempo_medio_obra = 1.5
@@ -502,16 +500,20 @@ def view_roteirizador():
         
         st.session_state.df_routed['DISTANCIA_PROXIMO_PONTO_KM'] = st.session_state.df_routed.groupby(['BASE_ATRIBUIDA', 'PERIODO'])['DISTANCIA_PONTO_ANTERIOR_KM'].shift(-1).fillna(0.0)
 
+        df_display = st.session_state.df_routed.drop(columns=['ROTA_GEOMETRIA', '_HORA_INICIO_DT', '_HORA_FIM_DT'], errors='ignore')
         df_editado_ui = st.data_editor(
-            st.session_state.df_routed, use_container_width=True,
+            df_display, use_container_width=True,
             column_config={ 
-                "ROTA_GEOMETRIA": None, "_HORA_INICIO_DT": None, "_HORA_FIM_DT": None,
                 "LATITUDE": st.column_config.NumberColumn(disabled=True), "LONGITUDE": st.column_config.NumberColumn(disabled=True),
                 "DISTANCIA_PONTO_ANTERIOR_KM": st.column_config.NumberColumn(disabled=True), "DISTANCIA_PROXIMO_PONTO_KM": st.column_config.NumberColumn(disabled=True), "TEMPO_VIAGEM_MINUTOS": st.column_config.NumberColumn(disabled=True)
             }
         )
         
         df_routed = df_editado_ui.copy()
+        for hidden_col in ['ROTA_GEOMETRIA', '_HORA_INICIO_DT', '_HORA_FIM_DT']:
+            if hidden_col in st.session_state.df_routed.columns:
+                df_routed[hidden_col] = st.session_state.df_routed[hidden_col]
+        
         bases_records = st.session_state.bases_records
         tipo_periodo = st.session_state.tipo_periodo
         colunas_exibir = st.session_state.colunas_exibir
@@ -541,7 +543,6 @@ def view_roteirizador():
             
         df_gantt['TAREFA'] = df_gantt.apply(label_tarefa, axis=1)
         
-        # MUDANÇA 4: Plotly Gantt usa os datetimes internos para alinhar as colunas sem poluir a visão
         df_gantt['START_PLOT'] = pd.to_datetime(df_gantt['_HORA_INICIO_DT'])
         df_gantt['END_PLOT'] = pd.to_datetime(df_gantt['_HORA_FIM_DT'])
         
@@ -752,7 +753,6 @@ def view_roteirizador():
             obras_equipe = unvisited[unvisited['BASE_ATRIBUIDA'] == b_name].to_dict('records')
             
             if obras_equipe:
-                # MUDANÇA 1: Roteia Prioridades Primeiro, e Comuns Depois
                 prio_obras = [o for o in obras_equipe if o.get('PRIORIDADE') == 'Sim']
                 comum_obras = [o for o in obras_equipe if o.get('PRIORIDADE') != 'Sim']
                 
@@ -762,7 +762,6 @@ def view_roteirizador():
                 if comum_obras:
                     ordered_tasks.extend(resolver_tsp_ortools(comum_obras, base_lat, base_lon, url_osrm_base))
                 
-                # MUDANÇA 2 e 3: FATIAMENTO HORÁRIO DE 08H AS 18H COM ALMOÇO
                 rotas_flat = []
                 ordem_global = 1
                 periodo = 1
@@ -805,7 +804,6 @@ def view_roteirizador():
                     limite_atingido = False
                     if cfg['modo_limite'] == "Quantidade Fixa de Obras" and estado['obras'] >= cfg['obras_por_periodo']:
                         limite_atingido = True
-                    # Trava relógio 18:00 (joga pro proximo dia se exceder)
                     if fim_previsto.hour >= 18 or fim_previsto.day > 1:
                         limite_atingido = True
                         
