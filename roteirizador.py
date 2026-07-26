@@ -306,7 +306,7 @@ def view_roteirizador():
     if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
 
     # =============================================================
-    # SIDEBAR: CONFIGURAÇÕES CONSTANTES (E TIMER)
+    # SIDEBAR: CONFIGURAÇÕES CONSTANTES E TIMER ANIMADO
     # =============================================================
     # Bloqueia a edição da barra se o sistema estiver rodando ou concluído
     is_locked = st.session_state.vrp_status != "IDLE" or st.session_state.roteamento_concluido
@@ -514,7 +514,7 @@ def view_roteirizador():
         
         st.progress(progresso)
         
-        # === CÁLCULO E EXIBIÇÃO DO TIMER NA BARRA LATERAL ===
+        # === CÁLCULO E EXIBIÇÃO DO TIMER ANIMADO NA BARRA LATERAL ===
         if state['obras_processadas'] > 0:
             avg = state['tempo_processamento'] / state['obras_processadas']
             restantes = total - state['obras_processadas']
@@ -528,13 +528,78 @@ def view_roteirizador():
                 if st.session_state.vrp_status == "PAUSED":
                     st.warning(f"⏸️ **Pausado**\n\nFaltavam {time_str}")
                 else:
-                    st.success(f"⏳ **{time_str}**")
+                    html_timer = f"""
+                    <style>
+                    @keyframes flip-glass {{
+                        0% {{ transform: rotate(0deg); }}
+                        40% {{ transform: rotate(180deg); }}
+                        50% {{ transform: rotate(180deg); }}
+                        90% {{ transform: rotate(360deg); }}
+                        100% {{ transform: rotate(360deg); }}
+                    }}
+                    .hourglass-anim {{
+                        display: inline-block;
+                        animation: flip-glass 2.5s ease-in-out infinite;
+                    }}
+                    .timer-alert {{
+                        padding: 0.75rem 1rem;
+                        border-radius: 0.5rem;
+                        background-color: rgba(46, 123, 50, 0.15);
+                        color: #176B2C;
+                        border: 1px solid rgba(46, 123, 50, 0.3);
+                        display: flex;
+                        align-items: center;
+                        font-family: sans-serif;
+                    }}
+                    @media (prefers-color-scheme: dark) {{
+                        .timer-alert {{
+                            background-color: rgba(60, 179, 113, 0.15);
+                            color: #66bb6a;
+                            border: 1px solid rgba(60, 179, 113, 0.3);
+                        }}
+                    }}
+                    </style>
+                    <div class="timer-alert">
+                        <span class="hourglass-anim" style="font-size:1.5rem; margin-right:12px;">⏳</span> 
+                        <strong style="font-size:1.2rem; letter-spacing: 0.5px;">{time_str}</strong>
+                    </div>
+                    """
+                    st.markdown(html_timer, unsafe_allow_html=True)
         else:
             with timer_placeholder.container():
                 st.markdown("### ⏱️ Tempo Restante")
-                st.info("⏳ Calculando estimativa...")
+                st.markdown("""
+                <style>
+                @keyframes pulse-text {
+                    0% { opacity: 0.4; }
+                    50% { opacity: 1; }
+                    100% { opacity: 0.4; }
+                }
+                .calculating-alert {
+                    padding: 0.75rem 1rem;
+                    border-radius: 0.5rem;
+                    background-color: rgba(26, 79, 124, 0.15);
+                    color: #1A4F7C;
+                    border: 1px solid rgba(26, 79, 124, 0.3);
+                    font-weight: 600;
+                    display: flex;
+                    align-items: center;
+                }
+                @media (prefers-color-scheme: dark) {
+                    .calculating-alert { color: #64B5F6; }
+                }
+                .spin-icon {
+                    display: inline-block;
+                    animation: pulse-text 1.5s infinite;
+                }
+                </style>
+                <div class="calculating-alert">
+                    <span class="spin-icon" style="font-size:1.2rem; margin-right:10px;">🔄</span> 
+                    <span style="animation: pulse-text 1.5s infinite;">Calculando estimativa...</span>
+                </div>
+                """, unsafe_allow_html=True)
         
-        # === FLUXO DE EXECUÇÃO ===
+        # === FLUXO DE EXECUÇÃO DA IA ===
         if st.session_state.vrp_status == "RUNNING":
             agora = time.time()
             state['tempo_processamento'] += (agora - state['last_time'])
