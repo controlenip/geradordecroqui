@@ -52,13 +52,15 @@ st.set_page_config(page_title="Roteirizador Operacional", page_icon="🚙", layo
 # ==========================================
 st.markdown("""
 <style>
-    .block-container { padding-top: 1.2rem !important; padding-bottom: 2rem !important; }
+    /* Aumentado o padding-top para evitar corte pelo cabeçalho nativo do Streamlit */
+    .block-container { padding-top: 4rem !important; padding-bottom: 2rem !important; }
     .stSelectbox label, .stFileUploader label, .stRadio label, .stNumberInput label, .stMultiSelect label { font-size: 14px !important; font-weight: 600 !important; color: #1A4F7C !important; }
 
     /* STEPPER DE PROGRESSO */
     .stepper-container {
         display: flex;
         justify-content: space-between;
+        margin-top: 0.5rem;
         margin-bottom: 1.5rem;
         padding: 0.75rem 1rem;
         background: rgba(26, 79, 124, 0.05);
