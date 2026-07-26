@@ -47,110 +47,42 @@ def get_retry_session(retries=4, backoff_factor=0.3):
 
 http_session = get_retry_session()
 
-st.set_page_config(page_title="Roteirizador Enterprise", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Roteirizador Enterprise V2", page_icon="⚡", layout="wide")
 
 # ==========================================
-# 2. INJEÇÃO DE CSS CUSTOMIZADO (DASHBASE PRO THEME)
+# 2. INJEÇÃO DE CSS CUSTOMIZADO E HELPERS
 # ==========================================
 st.markdown("""
 <style>
-    /* Importando Fonte Moderna */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-    }
-
-    /* Container Principal - Fundo Escuro Dashbase */
-    .stApp {
-        background-color: #0B0E14 !important;
-    }
-    
     .block-container { padding-top: 2.5rem !important; padding-bottom: 2rem !important; }
-
-    /* Textos Gerais */
-    h1, h2, h3, h4, h5, h6, span {
-        color: #F8FAFC !important;
-    }
-    p, label {
-        color: #94A3B8 !important;
-    }
-
-    /* Barra Lateral Escura */
-    [data-testid="stSidebar"] {
-        background-color: #06080F !important;
-        border-right: 1px solid #1E2532 !important;
-    }
-
-    /* Customização dos Cards Superiores */
-    .metric-card {
-        background: #151A28 !important;
-        border: 1px solid #1E2532 !important;
-        border-radius: 12px;
-        padding: 20px;
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        margin-bottom: 10px;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    .metric-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
-    .metric-icon {
-        font-size: 24px; padding: 12px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
-    }
-    .metric-title { font-size: 13px; font-weight: 600; color: #94A3B8 !important; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .metric-value { font-size: 26px; font-weight: 700; color: #F8FAFC !important; }
-
-    /* Barra de Progresso (Stepper) */
-    .stepper-container { 
-        display: flex; justify-content: space-between; margin-top: 0.5rem; margin-bottom: 1.5rem; 
-        padding: 1rem; background: #151A28; border-radius: 12px; border: 1px solid #1E2532; 
-    }
-    .step-item { font-size: 13px; font-weight: 600; color: #475569; display: flex; align-items: center; gap: 8px; }
-    .step-item.active { color: #6366F1; } /* Roxo Neon */
-    .step-item.done { color: #10B981; }   /* Verde Neon */
+    .stSelectbox label, .stFileUploader label, .stRadio label, .stNumberInput label, .stMultiSelect label { font-size: 14px !important; font-weight: 600 !important; color: #1A4F7C !important; }
+    .stepper-container { display: flex; justify-content: space-between; margin-top: 0.5rem; margin-bottom: 1.5rem; padding: 0.75rem 1rem; background: rgba(26, 79, 124, 0.05); border-radius: 8px; border: 1px solid rgba(26, 79, 124, 0.1); }
+    .step-item { font-size: 13px; font-weight: 600; color: #6c757d; display: flex; align-items: center; gap: 6px; }
+    .step-item.active { color: #0070C0; }
+    .step-item.done { color: #28a745; }
     
-    /* Box de Raio-X */
-    .profiling-box { background: rgba(99, 102, 241, 0.05); border-left: 4px solid #6366F1; padding: 15px; border-radius: 5px; margin-bottom: 20px;}
-
-    /* Containers, Expansores e Inputs */
-    [data-testid="stExpander"], div[data-testid="stVerticalBlock"] > div[style*="border"] {
-        background-color: #151A28 !important;
-        border: 1px solid #1E2532 !important;
-        border-radius: 12px !important;
+    .metric-card { background: #ffffff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: flex; align-items: center; gap: 16px; margin-bottom: 10px; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .metric-card:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.1); }
+    .metric-icon { font-size: 26px; padding: 12px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+    .metric-content .metric-title { font-size: 13px; font-weight: 700; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .metric-content .metric-value { font-size: 24px; font-weight: 800; color: #212529; }
+    
+    .profiling-box { background: rgba(23, 162, 184, 0.05); border-left: 4px solid #17a2b8; padding: 15px; border-radius: 5px; margin-bottom: 20px;}
+    
+    /* Melhoria Visual das Abas (Tabs) */
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f8f9fa; border-radius: 4px 4px 0px 0px; gap: 1px; padding-top: 10px; padding-bottom: 10px; font-weight: 600; color: #495057; }
+    .stTabs [aria-selected="true"] { background-color: #e9ecef; border-bottom: 3px solid #0070C0; color: #0070C0; }
+    
+    @media (prefers-color-scheme: dark) {
+        .stepper-container { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.1); }
+        .metric-card { background: #262730; border-color: #333; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+        .metric-content .metric-title { color: #b3bdc8; }
+        .metric-content .metric-value { color: #ffffff; }
+        .profiling-box { background: rgba(23, 162, 184, 0.1); }
+        .stTabs [data-baseweb="tab"] { background-color: #333; color: #ccc; }
+        .stTabs [aria-selected="true"] { background-color: #444; border-bottom: 3px solid #3b82f6; color: #fff; }
     }
-    .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] {
-        background-color: #0B0E14 !important;
-        color: #F8FAFC !important;
-        border: 1px solid #1E2532 !important;
-        border-radius: 8px;
-    }
-    .stFileUploader {
-        background-color: #0B0E14 !important;
-        border: 1px dashed #334155 !important;
-        border-radius: 8px;
-    }
-
-    /* Abas de Navegação (Tabs) */
-    .stTabs [data-baseweb="tab-list"] { background-color: transparent; gap: 8px; }
-    .stTabs [data-baseweb="tab"] { 
-        background-color: #151A28; color: #94A3B8 !important; 
-        border-radius: 8px 8px 0 0; border: 1px solid #1E2532; border-bottom: none; 
-        padding: 10px 20px; font-weight: 600; height: 50px;
-    }
-    .stTabs [aria-selected="true"] { 
-        background-color: #6366F1 !important; color: #ffffff !important; border: 1px solid #6366F1; 
-    }
-
-    /* Botões Padrão (Roxo Dashbase) */
-    .stButton>button {
-        background-color: #6366F1 !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-    }
-    .stButton>button:hover { background-color: #4F46E5 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -361,7 +293,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
         df_export.to_excel(writer, index=False, sheet_name='Roteiro')
         ws = writer.sheets['Roteiro']
         
-        header_fill = PatternFill(start_color='6366F1', end_color='6366F1', fill_type='solid')
+        header_fill = PatternFill(start_color='0070C0', end_color='0070C0', fill_type='solid')
         header_font = Font(color='FFFFFF', bold=True)
         center_align = Alignment(horizontal='center', vertical='center')
         left_align = Alignment(horizontal='left', vertical='center')
@@ -406,7 +338,7 @@ def gerar_excel_resumo_bytes(df):
         df.to_excel(writer, index=False, sheet_name='Resumo')
         ws = writer.sheets['Resumo']
         
-        header_fill = PatternFill(start_color='6366F1', end_color='6366F1', fill_type='solid')
+        header_fill = PatternFill(start_color='0070C0', end_color='0070C0', fill_type='solid')
         header_font = Font(color='FFFFFF', bold=True)
         center_align = Alignment(horizontal='center', vertical='center')
         left_align = Alignment(horizontal='left', vertical='center')
@@ -552,6 +484,7 @@ def view_roteirizador():
 
     is_locked = status_exec != "IDLE" or is_done
     
+    # VISUAL UPGRADE: Reorganização da Barra Lateral com Expanders
     with st.sidebar:
         with st.expander("⚙️ Esforço e Limites Diários", expanded=True):
             tipo_periodo = st.radio("Agrupamento de percurso:", ["Dia", "Semana"], horizontal=True, disabled=is_locked)
@@ -586,7 +519,7 @@ def view_roteirizador():
         timer_placeholder = st.empty()
 
     # =========================================================
-    # ESTADO 4: RESULTADOS FINAIS
+    # ESTADO 4: RESULTADOS FINAIS E UI DAS ABAS
     # =========================================================
     if is_done and not st.session_state.df_routed.empty:
         st.markdown("## 🎯 Resultados da Otimização")
@@ -604,12 +537,12 @@ def view_roteirizador():
         tot_km = f"{df_routed['DISTANCIA_PONTO_ANTERIOR_KM'].sum():.1f} km"
         tot_prio = len(df_real_tasks[df_real_tasks['PRIORIDADE'] == 'Sim']) if 'PRIORIDADE' in df_real_tasks else 0
 
-        # Linha 1 de Cards (Operação) - Estilo Dashbase Neon
+        # Linha 1 de Cards (Operação)
         c_m1, c_m2, c_m3, c_m4 = st.columns(4)
-        c_m1.markdown(f'<div class="metric-card"><div class="metric-icon" style="background: rgba(99, 102, 241, 0.15); color: #6366F1;">📌</div><div class="metric-content"><div class="metric-title">Obras Roteirizadas</div><div class="metric-value">{tot_obras}</div></div></div>', unsafe_allow_html=True)
-        c_m2.markdown(f'<div class="metric-card"><div class="metric-icon" style="background: rgba(59, 130, 246, 0.15); color: #3B82F6;">👥</div><div class="metric-content"><div class="metric-title">Equipes em Campo</div><div class="metric-value">{tot_equipes}</div></div></div>', unsafe_allow_html=True)
-        c_m3.markdown(f'<div class="metric-card"><div class="metric-icon" style="background: rgba(245, 158, 11, 0.15); color: #F59E0B;">🛣️</div><div class="metric-content"><div class="metric-title">KM Total Projetado</div><div class="metric-value">{tot_km}</div></div></div>', unsafe_allow_html=True)
-        c_m4.markdown(f'<div class="metric-card"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15); color: #EF4444;">🚨</div><div class="metric-content"><div class="metric-title">Prioridades</div><div class="metric-value">{tot_prio}</div></div></div>', unsafe_allow_html=True)
+        c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #3b82f6;"><div class="metric-icon" style="background: rgba(59, 130, 246, 0.15);">📌</div><div class="metric-content"><div class="metric-title">Obras Roteirizadas</div><div class="metric-value">{tot_obras}</div></div></div>', unsafe_allow_html=True)
+        c_m2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👥</div><div class="metric-content"><div class="metric-title">Equipes em Campo</div><div class="metric-value">{tot_equipes}</div></div></div>', unsafe_allow_html=True)
+        c_m3.markdown(f'<div class="metric-card" style="border-left: 5px solid #10b981;"><div class="metric-icon" style="background: rgba(16, 185, 129, 0.15);">🛣️</div><div class="metric-content"><div class="metric-title">KM Total Projetado</div><div class="metric-value">{tot_km}</div></div></div>', unsafe_allow_html=True)
+        c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">🚨</div><div class="metric-content"><div class="metric-title">Prioridades</div><div class="metric-value">{tot_prio}</div></div></div>', unsafe_allow_html=True)
 
         # Linha 2 de Cards (Financeiro)
         cf_comb = st.session_state.config_financeira.get('custo_combustivel', 5.80)
@@ -638,13 +571,14 @@ def view_roteirizador():
         custo_por_obra = custo_operacao_total / tot_obras if tot_obras > 0 else 0.0
 
         c_fin1, c_fin2, c_fin3, c_fin4 = st.columns(4)
-        c_fin1.markdown(f'<div class="metric-card"><div class="metric-icon" style="background: rgba(16, 185, 129, 0.15); color: #10B981;">⛽</div><div class="metric-content"><div class="metric-title">Combustível Estimado</div><div class="metric-value">R$ {formatar_moeda(custo_total_combustivel)}</div></div></div>', unsafe_allow_html=True)
-        c_fin2.markdown(f'<div class="metric-card"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15); color: #8B5CF6;">👷</div><div class="metric-content"><div class="metric-title">Mão de Obra ({horas_totais:.1f}h)</div><div class="metric-value">R$ {formatar_moeda(custo_total_mao_de_obra)}</div></div></div>', unsafe_allow_html=True)
-        c_fin3.markdown(f'<div class="metric-card"><div class="metric-icon" style="background: rgba(236, 72, 153, 0.15); color: #EC4899;">💲</div><div class="metric-content"><div class="metric-title">Custo Total Operação</div><div class="metric-value">R$ {formatar_moeda(custo_operacao_total)}</div></div></div>', unsafe_allow_html=True)
-        c_fin4.markdown(f'<div class="metric-card"><div class="metric-icon" style="background: rgba(20, 184, 166, 0.15); color: #14B8A6;">📊</div><div class="metric-content"><div class="metric-title">Custo Médio por Obra</div><div class="metric-value">R$ {formatar_moeda(custo_por_obra)}</div></div></div>', unsafe_allow_html=True)
+        c_fin1.markdown(f'<div class="metric-card" style="border-left: 5px solid #f59e0b;"><div class="metric-icon" style="background: rgba(245, 158, 11, 0.15);">⛽</div><div class="metric-content"><div class="metric-title">Combustível Estimado</div><div class="metric-value">R$ {formatar_moeda(custo_total_combustivel)}</div></div></div>', unsafe_allow_html=True)
+        c_fin2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👷</div><div class="metric-content"><div class="metric-title">Mão de Obra ({horas_totais:.1f}h)</div><div class="metric-value">R$ {formatar_moeda(custo_total_mao_de_obra)}</div></div></div>', unsafe_allow_html=True)
+        c_fin3.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">💲</div><div class="metric-content"><div class="metric-title">Custo Total Operação</div><div class="metric-value">R$ {formatar_moeda(custo_operacao_total)}</div></div></div>', unsafe_allow_html=True)
+        c_fin4.markdown(f'<div class="metric-card" style="border-left: 5px solid #10b981;"><div class="metric-icon" style="background: rgba(16, 185, 129, 0.15);">📊</div><div class="metric-content"><div class="metric-title">Custo Médio por Obra</div><div class="metric-value">R$ {formatar_moeda(custo_por_obra)}</div></div></div>', unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("---")
 
+        # VISUAL UPGRADE: Abas de Navegação (Tabs)
         tab_dados, tab_gantt, tab_mapa = st.tabs(["📊 Dados Tabulares e Arquivos", "⏱️ Timeline Interativa (Gantt)", "🗺️ Mapa Geográfico de Rotas"])
 
         with tab_dados:
@@ -699,12 +633,11 @@ def view_roteirizador():
 
             st.markdown("<br>", unsafe_allow_html=True)
             col_b1, col_b2, col_b3 = st.columns([1, 1, 1])
-            col_b1.download_button("🌐 1. Baixar Planilhas (ZIP)", data=buf_zip_xl.getvalue(), file_name=f"Dados_Estruturados_Roteiro_{data_atual}.zip", mime="application/zip", use_container_width=True)
-            col_b2.download_button("🗺️ 2. Baixar Mapas (KML)", data=buf_zip_kml.getvalue(), file_name=f"Mapas_KML_{data_atual}.zip", mime="application/zip", use_container_width=True)
+            col_b1.download_button("🌐 1. Planilhas Roteirizadas (ZIP)", data=buf_zip_xl.getvalue(), file_name=f"Dados_Estruturados_Roteiro_{data_atual}.zip", mime="application/zip", use_container_width=True)
+            col_b2.download_button("🗺️ 2. Baixar Mapas (KML ZIP)", data=buf_zip_kml.getvalue(), file_name=f"Mapas_KML_{data_atual}.zip", mime="application/zip", use_container_width=True)
             if col_b3.button("🧹 Nova Roteirização", type="primary", use_container_width=True): limpar_roteirizador()
 
         with tab_gantt:
-            st.markdown("#### Linha do Tempo das Equipes")
             df_gantt = df_routed.copy()
             
             def label_tarefa(row):
@@ -723,34 +656,25 @@ def view_roteirizador():
             
             periodos_disp = sorted(df_gantt['PERIODO'].unique())
             if periodos_disp:
-                p_sel = st.selectbox("Selecione o Período:", periodos_disp)
+                p_sel = st.selectbox("Selecione o Período para analisar a agenda:", periodos_disp)
                 df_plot = df_gantt[df_gantt['PERIODO'] == p_sel]
                 
-                # Plotly MODO ESCURO INJETADO AQUI
                 fig = px.timeline(
                     df_plot, 
                     x_start="START_PLOT", x_end="END_PLOT", y="BASE_ATRIBUIDA", color="TAREFA",
                     hover_name="PROTOCOLO",
-                    color_discrete_map={'Deslocamento/Retorno': '#64748B', 'Pausa para Almoço': '#F59E0B', 'Obra Operacional': '#3B82F6', '🚨 Obra Operacional': '#EF4444'},
+                    color_discrete_map={'Deslocamento/Retorno': '#6c757d', 'Pausa para Almoço': '#f39c12', 'Obra Operacional': '#3498db', '🚨 Obra Operacional': '#e74c3c'},
                     height=300 + (len(df_plot['BASE_ATRIBUIDA'].unique()) * 30)
                 )
-                fig.update_yaxes(autorange="reversed", title="")
+                fig.update_yaxes(autorange="reversed", title="Levantadores")
                 fig.layout.xaxis.tickformat = '%H:%M'
-                fig.update_layout(
-                    xaxis_title="Horário do Dia", 
-                    margin=dict(l=0, r=0, t=30, b=0),
-                    template="plotly_dark",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    paper_bgcolor="rgba(0,0,0,0)"
-                )
+                fig.update_layout(xaxis_title="Horário do Dia", margin=dict(l=0, r=0, t=30, b=0))
                 st.plotly_chart(fig, use_container_width=True)
 
         with tab_mapa:
-            st.markdown("#### Vista Panorâmica por Satélite")
-            # MUDANÇA: Folium Dark Mode (cartodbdark_matter) para combinar com o fundo do app
-            mapa = folium.Map(location=[df_routed['LATITUDE'].mean(), df_routed['LONGITUDE'].mean()], zoom_start=8, tiles='cartodbdark_matter') if not df_routed.empty else folium.Map(location=[-5.2, -45.0], zoom_start=7, tiles='cartodbdark_matter')
+            mapa = folium.Map(location=[df_routed['LATITUDE'].mean(), df_routed['LONGITUDE'].mean()], zoom_start=8) if not df_routed.empty else folium.Map(location=[-5.2, -45.0], zoom_start=7)
             
-            cores_folium = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f43f5e', '#eab308', '#6366f1', '#84cc16']
+            cores_folium = ['#e6194b', '#00bcd4', '#3f51b5', '#009688', '#ff9800', '#9c27b0', '#cddc39', '#e91e63', '#ffeb3b', '#795548']
             lista_bases_mapa = df_routed['BASE_ATRIBUIDA'].unique().tolist()
             
             heat_data = [[r['LATITUDE'], r['LONGITUDE']] for _, r in df_real_tasks.iterrows()]
@@ -774,7 +698,7 @@ def view_roteirizador():
                         if isinstance(r.get('ROTA_GEOMETRIA'), list):
                             for lon, lat in r['ROTA_GEOMETRIA']: pontos_linha_folium.append([lat, lon]) 
                                 
-                    folium.PolyLine(pontos_linha_folium, color='#F8FAFC', weight=6, opacity=0.8).add_to(fg_linhas)
+                    folium.PolyLine(pontos_linha_folium, color='black', weight=7, opacity=0.9).add_to(fg_linhas)
                     folium.PolyLine(pontos_linha_folium, color=cor_rota, weight=3, opacity=1.0).add_to(fg_linhas)
                     fg_linhas.add_to(mapa)
                     
@@ -783,23 +707,23 @@ def view_roteirizador():
                         icone = identificar_icone_folium(r, df_routed.columns)
                         cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
                         
-                        pop_header_bg = "#EF4444" if r.get('PRIORIDADE') == "Sim" else "#3B82F6"
+                        pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0070C0"
                         pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
                         
                         dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
                         
-                        extra_rows = "".join([f"<tr><td style='padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;'>{html.escape(str(c))}:</td><td style='padding:4px 8px; color:#222; border-bottom:1px solid #eee;'>{html.escape(str(r.get(c, '')))}</td></tr>" for c in colunas_exibir if c.upper() != 'PROTOCOLO'])
+                        extra_rows = "".join([f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{html.escape(str(r.get(c,'')))}</td></tr>" for c in colunas_exibir if c.upper() != 'PROTOCOLO'])
 
                         popup_html = f"""
-                        <div style="font-family: 'Inter', sans-serif; width:300px; border-radius:6px; overflow:hidden; border:1px solid #ccc; background:#fff;">
-                            <div style="background:{pop_header_bg}; color:white; padding:10px; font-size:14px; font-weight:bold; text-align:center;">{pop_prio_txt}</div>
-                            <div style="padding:10px; background:#fafafa; font-size:13px;">
-                                <table style="width:100%; border-collapse:collapse; text-align:left;">
-                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; width:40%;">Protocolo:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{html.escape(str(r.get('PROTOCOLO', 'N/A')))}</td></tr>
-                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Ordem:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
-                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Horário:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
-                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Ant.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
-                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Próx.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{dist_prox} KM</td></tr>
+                        <div style="font-family:sans-serif; width:260px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
+                            <div style="background:{pop_header_bg}; color:white; padding:8px 10px; font-size:13px; font-weight:bold;">{pop_prio_txt}</div>
+                            <div style="padding:10px; background:#fafafa; font-size:12px;">
+                                <table style="width:100%; border-collapse:collapse;">
+                                    <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Protocolo:</td><td style="padding:3px 6px; color:#333;">{html.escape(str(r.get('PROTOCOLO', 'N/A')))}</td></tr>
+                                    <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
+                                    <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
+                                    <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                                    <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
                                     {extra_rows}
                                 </table>
                             </div>
@@ -807,7 +731,7 @@ def view_roteirizador():
                         folium.Marker([r['LATITUDE'], r['LONGITUDE']], icon=folium.Icon(color=cor_icone, icon=icone), popup=folium.Popup(popup_html, max_width=300)).add_to(marker_cluster)
             
             folium.LayerControl().add_to(mapa)
-            st_folium(mapa, use_container_width=True, height=600, returned_objects=[])
+            st_folium(mapa, use_container_width=True, height=550, returned_objects=[])
             
         return 
 
@@ -850,7 +774,7 @@ def view_roteirizador():
                 
                 st.markdown("### ⏱️ Tempo Restante")
                 st.markdown(f"""
-                <div style="padding: 0.75rem 1rem; border-radius: 0.5rem; background-color: rgba(46, 123, 50, 0.15); color: #10B981; border: 1px solid rgba(46, 123, 50, 0.3); display: flex; align-items: center;">
+                <div style="padding: 0.75rem 1rem; border-radius: 0.5rem; background-color: rgba(46, 123, 50, 0.15); color: #176B2C; border: 1px solid rgba(46, 123, 50, 0.3); display: flex; align-items: center;">
                     <span style="font-size:1.5rem; margin-right:12px;">⏳</span> 
                     <strong style="font-size:1.2rem;">{time_str}</strong>
                 </div>
@@ -858,7 +782,7 @@ def view_roteirizador():
             else:
                 st.markdown("### ⏱️ Tempo Restante")
                 st.markdown(f"""
-                <div style="padding: 0.75rem 1rem; border-radius: 0.5rem; background-color: rgba(99, 102, 241, 0.15); color: #6366F1; border: 1px solid rgba(99, 102, 241, 0.3); display: flex; align-items: center;">
+                <div style="padding: 0.75rem 1rem; border-radius: 0.5rem; background-color: rgba(26, 79, 124, 0.15); color: #1A4F7C; border: 1px solid rgba(26, 79, 124, 0.3); display: flex; align-items: center;">
                     <span style="font-size:1.2rem; margin-right:10px;">🔄</span> 
                     <span>Calculando estimativa...</span>
                 </div>
@@ -1243,7 +1167,7 @@ def view_roteirizador():
     st.markdown("#### 📊 Raio-X da Base de Dados Carregada")
     st.markdown(f"""
     <div class="profiling-box">
-        <b>Análise Estrutural:</b> Das {total_obras_inicial} linhas encontradas, o sistema filtrou e aprovou <b style="color: #6366F1;">{len(df_tasks)} obras válidas</b> para roteamento. <br>
+        <b>Análise Estrutural:</b> Das {total_obras_inicial} linhas encontradas, o sistema filtrou e aprovou <b>{len(df_tasks)} obras válidas</b> para roteamento. <br>
         <i>(Omitidos: {qtd_erros_coords_finais} sem coordenadas resolvíveis | {erros_nome} sem nome de cliente | Restante fora do status padrão).</i>
     </div>
     """, unsafe_allow_html=True)
