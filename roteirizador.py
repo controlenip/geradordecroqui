@@ -14,7 +14,7 @@ from datetime import datetime
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
-# === MUDANÇA BRUTA 1: IMPORTAÇÃO DO MOTOR VRP DO GOOGLE ===
+# === IMPORTAÇÃO DO MOTOR VRP DO GOOGLE ===
 try:
     from ortools.constraint_solver import routing_enums_pb2
     from ortools.constraint_solver import pywrapcp
@@ -134,18 +134,17 @@ def haversine_vectorized(lat1, lon1, lat2, lon2):
     c = 2 * np.arcsin(np.sqrt(a))
     return R * c
 
-# Substitui o K-Means genérico pelo motor de roteamento do Google
 def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg):
     """
-    Motor OR-Tools VRP. Resolve múltiplas rotas (dias/semanas) de uma vez
-    respeitando limites rígidos de capacidade e otimizando distância.
+    Motor OR-Tools VRP. 
+    Resolve múltiplas rotas respeitando limites de capacidade.
+    Nesta versão, permitimos que ele IGNORE nós se estiverem muito distantes,
+    evitando que o sistema quebre caso os limites sejam muito rígidos.
     """
     if not lista_obras: return []
     
-    # Monta a lista de coordenadas (Índice 0 é sempre a Base/Depósito)
     coords = [(base_lat, base_lon)] + [(r['LATITUDE'], r['LONGITUDE']) for r in lista_obras]
     
-    # 1. Cria a Matriz de Distâncias em metros
     distance_matrix = []
     for i in range(len(coords)):
         row = []
@@ -154,20 +153,17 @@ def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg):
             row.append(int(dist))
         distance_matrix.append(row)
         
-    num_veiculos = cfg['limite_periodos'] # Trata cada período(dia) como um veículo
+    num_veiculos = int(cfg['limite_periodos'])
     
-    # Determina o peso de cada nó dependendo do modo de roteamento
     demands = [0]
     capacities = []
     
     if cfg['modo_limite'] == "Quantidade Fixa de Obras":
-        for r in lista_obras: demands.append(1) # Cada obra pesa 1
+        for r in lista_obras: demands.append(1) 
         capacities = [int(cfg['obras_por_periodo'])] * num_veiculos
     else:
-        # Modo por tempo: O peso é o (tempo estimado de viagem + execução) em minutos
-        for i, r in enumerate(lista_obras):
+        for r in lista_obras:
             is_rur = True if ('LOCALIDADE' in r and str(r['LOCALIDADE']).upper() == 'RURAL') or ('TIPO NOTA' in r and str(r['TIPO NOTA']).upper() == 'UNR') else False
-            # Distância reta para o ponto * fator de via + tempo de execução
             dist_reta_km = haversine_vectorized(base_lat, base_lon, r['LATITUDE'], r['LONGITUDE'])
             tempo_viagem = (dist_reta_km / cfg['velocidade_media_kmh']) * (1.6 if is_rur else 1.0) * 60
             peso_minutos = int(tempo_viagem + (cfg['tempo_medio_obra'] * 60))
@@ -175,7 +171,6 @@ def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg):
         max_minutos_dia = int(cfg['horas_por_dia'] * 60)
         capacities = [max_minutos_dia] * num_veiculos
 
-    # Monta o modelo do Google OR-Tools
     manager = pywrapcp.RoutingIndexManager(len(distance_matrix), num_veiculos, 0)
     routing = pywrapcp.RoutingModel(manager)
 
@@ -194,12 +189,17 @@ def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg):
     demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
     routing.AddDimensionWithVehicleCapacity(
         demand_callback_index,
-        0,  # null capacity slack
-        capacities,  # limites máximos
-        True,  # start cumul to zero
+        0,  
+        capacities,  
+        True,  
         'Capacity')
 
-    # Configura a IA de busca (Limitamos a 3 segundos de raciocínio profundo por equipe)
+    # === CORREÇÃO CRÍTICA ===
+    # Permite que o motor "Abandone" pontos que não cabem no tempo, em vez de falhar e retornar Vazio.
+    penalty = 10000000 
+    for node in range(1, len(distance_matrix)):
+        routing.AddDisjunction([manager.NodeToIndex(node)], penalty)
+
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     search_parameters.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
@@ -214,13 +214,29 @@ def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg):
             rota_atual = []
             while not routing.IsEnd(index):
                 node_index = manager.IndexToNode(index)
-                if node_index != 0: # Ignora o depósito inicial
+                if node_index != 0:
                     rota_atual.append(lista_obras[node_index - 1])
                 index = solution.Value(routing.NextVar(index))
             if len(rota_atual) > 0:
                 rotas_por_periodo.append(rota_atual)
     
     return rotas_por_periodo
+
+def kmeans_clustering(coords, k, max_iters=100):
+    np.random.seed(42)
+    unique_coords = np.unique(coords, axis=0)
+    if len(unique_coords) < k: k = len(unique_coords)
+    indices = np.random.choice(len(unique_coords), k, replace=False)
+    centroids = unique_coords[indices]
+    labels = np.zeros(len(coords))
+    for _ in range(max_iters):
+        diff = coords[:, np.newaxis, :] - centroids[np.newaxis, :, :]
+        dists = np.linalg.norm(diff, axis=2)
+        labels = np.argmin(dists, axis=1)
+        new_centroids = np.array([coords[labels == i].mean(axis=0) if np.sum(labels == i) > 0 else centroids[i] for i in range(k)])
+        if np.allclose(centroids, new_centroids): break
+        centroids = new_centroids
+    return labels, centroids
 
 @st.cache_data(show_spinner=False)
 def obter_coordenadas_municipio_cached(municipio):
@@ -234,13 +250,11 @@ def obter_coordenadas_municipio_cached(municipio):
 
 def obter_rota_ruas(lat1, lon1, lat2, lon2, url_osrm_base, vel_fallback_kmh=30):
     try:
-        # Usa o motor configurado na barra lateral (Pode ser local do Docker ou da nuvem)
         url = f"{url_osrm_base}/route/v1/driving/{lon1:.6f},{lat1:.6f};{lon2:.6f},{lat2:.6f}?overview=full&geometries=geojson"
         r = http_session.get(url, timeout=5)
         if r.status_code == 200 and r.json().get('code') == 'Ok':
             return r.json()['routes'][0]['geometry']['coordinates'], r.json()['routes'][0]['duration']
     except Exception: pass
-    # Fallback se a API falhar: Linha reta com tempo estimado
     dist_km = haversine_vectorized(lat1, lon1, lat2, lon2)
     return [[lon1, lat1], [lon2, lat2]], (dist_km / vel_fallback_kmh) * 3600
 
@@ -394,6 +408,16 @@ def view_roteirizador():
     status_exec = st.session_state.vrp_status
     is_done = st.session_state.roteamento_concluido
     
+    # -------------------------------------------------------------
+    # PREVENÇÃO DE FALHA SILENCIOSA
+    # -------------------------------------------------------------
+    if is_done:
+        if st.session_state.df_routed.empty:
+            st.error("🚨 Nenhuma rota pôde ser gerada! Isso geralmente ocorre porque o limite de obras, km ou carga horária é muito pequeno para alocar até mesmo uma única demanda (ou as obras estão distantes demais da equipe).")
+            if st.button("⬅️ Voltar e Ajustar Limites"):
+                limpar_roteirizador()
+            return
+
     s1_class = "step-item done" if (status_exec != "IDLE" or is_done) else "step-item active"
     s2_class = "step-item done" if (status_exec != "IDLE" or is_done) else "step-item active"
     s3_class = "step-item active" if status_exec != "IDLE" else ("step-item done" if is_done else "step-item")
@@ -433,7 +457,7 @@ def view_roteirizador():
             
         st.markdown("---")
         st.markdown("### 📡 Conexão de Roteamento")
-        st.caption("Implementação 2A: Para desempenho máximo de dezenas de milhares de pontos, suba um OSRM Local via Docker e aponte a URL abaixo.")
+        st.caption("Implementação 2A: Para desempenho máximo, suba um OSRM Local via Docker e aponte a URL abaixo.")
         url_osrm_base = st.text_input("Endpoint OSRM:", value="http://router.project-osrm.org", disabled=is_locked)
         
         st.markdown("---")
@@ -468,7 +492,6 @@ def view_roteirizador():
 
         st.markdown("---")
         
-        # === MUDANÇA BRUTA 5: MOTOR DE MAPA PYDECK 3D ===
         st.markdown("#### 🗺️ Visualização Geográfica do Plano (Aceleração 3D WebGL)")
         
         df_pontos_mapa = df_real_tasks.copy()
@@ -554,8 +577,6 @@ def view_roteirizador():
     # -------------------------------------------------------------
     # 2. MÁQUINA DE ESTADOS - ROTEAMENTO ASSÍNCRONO POR LOTES
     # -------------------------------------------------------------
-    # MUDANÇA BRUTA 3: O processamento em background (Assíncrono simulado via Machine State).
-    # Em vez de iterar ponto a ponto e congelar a tela, chamamos o OR-Tools para processar equipes inteiras.
     if status_exec in ["RUNNING"]:
         st.markdown("## 🚀 Execução do Motor de Inteligência (OR-Tools VRP)")
         st.markdown("O servidor logístico de alta performance está roteando as equipes em lote.")
@@ -570,6 +591,57 @@ def view_roteirizador():
         st.progress(progresso)
         status_text = st.empty()
         
+        agora = time.time()
+        if 'last_time' not in state: state['last_time'] = agora
+        if 'tempo_processamento' not in state: state['tempo_processamento'] = 0.0
+        
+        state['tempo_processamento'] += (agora - state['last_time'])
+        state['last_time'] = agora
+
+        with timer_placeholder.container():
+            if state['b_idx'] > 0:
+                avg = state['tempo_processamento'] / state['b_idx']
+                restantes = total_equipes - state['b_idx']
+                est_rem = avg * restantes
+                m, s = divmod(int(est_rem), 60)
+                h, m = divmod(m, 60)
+                time_str = f"{h:02d}h {m:02d}m {s:02d}s" if h > 0 else f"{m:02d}m {s:02d}s"
+                
+                html_timer = f"""
+                <style>
+                @keyframes flip-glass {{
+                    0% {{ transform: rotate(0deg); }}
+                    40% {{ transform: rotate(180deg); }}
+                    50% {{ transform: rotate(180deg); }}
+                    90% {{ transform: rotate(360deg); }}
+                    100% {{ transform: rotate(360deg); }}
+                }}
+                .hourglass-anim {{ display: inline-block; animation: flip-glass 2.5s ease-in-out infinite; }}
+                .timer-alert {{ padding: 0.75rem 1rem; border-radius: 0.5rem; background-color: rgba(46, 123, 50, 0.15); color: #176B2C; border: 1px solid rgba(46, 123, 50, 0.3); display: flex; align-items: center; font-family: sans-serif; }}
+                @media (prefers-color-scheme: dark) {{ .timer-alert {{ background-color: rgba(60, 179, 113, 0.15); color: #66bb6a; border: 1px solid rgba(60, 179, 113, 0.3); }} }}
+                </style>
+                <div class="timer-alert">
+                    <span class="hourglass-anim" style="font-size:1.5rem; margin-right:12px;">⏳</span> 
+                    <strong style="font-size:1.2rem; letter-spacing: 0.5px;">{time_str}</strong>
+                </div>
+                """
+                st.markdown("### ⏱️ Tempo Restante")
+                st.markdown(html_timer, unsafe_allow_html=True)
+            else:
+                st.markdown("### ⏱️ Tempo Restante")
+                st.markdown("""
+                <style>
+                @keyframes pulse-text { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+                .calculating-alert { padding: 0.75rem 1rem; border-radius: 0.5rem; background-color: rgba(26, 79, 124, 0.15); color: #1A4F7C; border: 1px solid rgba(26, 79, 124, 0.3); font-weight: 600; display: flex; align-items: center; }
+                @media (prefers-color-scheme: dark) { .calculating-alert { color: #64B5F6; } }
+                .spin-icon { display: inline-block; animation: pulse-text 1.5s infinite; }
+                </style>
+                <div class="calculating-alert">
+                    <span class="spin-icon" style="font-size:1.2rem; margin-right:10px;">🔄</span> 
+                    <span style="animation: pulse-text 1.5s infinite;">Calculando estimativa...</span>
+                </div>
+                """, unsafe_allow_html=True)
+
         df_todas_bases_ativas = pd.DataFrame(st.session_state.bases_records)
         
         if state['b_idx'] >= len(state['b_names']):
@@ -593,7 +665,6 @@ def view_roteirizador():
             obras_equipe = unvisited[unvisited['BASE_ATRIBUIDA'] == b_name].to_dict('records')
             
             if obras_equipe:
-                # O motor OR-Tools devolve as listas já ordenadas perfeitamente para todos os dias permitidos
                 rotas_resolvidas = roteirizar_equipe_ortools(obras_equipe, base_lat, base_lon, cfg)
                 
                 ordem_global = 1
@@ -602,7 +673,6 @@ def view_roteirizador():
                     lat_atual, lon_atual = base_lat, base_lon
                     
                     for r_idx, obra in enumerate(rota_dia):
-                        # Pega a geometria viária real via OSRM para traçar a rota final gerada
                         rota_geom, dur_sec = obter_rota_ruas(lat_atual, lon_atual, obra['LATITUDE'], obra['LONGITUDE'], url_osrm_base, cfg['velocidade_media_kmh'])
                         
                         obra['ORDEM'] = ordem_global
@@ -617,7 +687,6 @@ def view_roteirizador():
                         lat_atual, lon_atual = obra['LATITUDE'], obra['LONGITUDE']
                         ordem_global += 1
                         
-                    # Retorno à base no final do dia
                     rota_retorno, dur_ret_seg = obter_rota_ruas(lat_atual, lon_atual, base_lat, base_lon, url_osrm_base, cfg['velocidade_media_kmh'])
                     dist_retorno = haversine_vectorized(lat_atual, lon_atual, base_lat, base_lon)
                     state['routed_data'].append({
@@ -630,7 +699,7 @@ def view_roteirizador():
                     ordem_global += 1
 
             state['b_idx'] += 1
-            st.rerun() # Move para a próxima equipe de forma assíncrona visualmente
+            st.rerun()
         return 
 
     # -------------------------------------------------------------
@@ -674,6 +743,8 @@ def view_roteirizador():
                             
                         df_bases = df_bases.dropna(subset=['LATITUDE', 'LONGITUDE'])
                         df_bases['TIPO_EQUIPE'] = 'PRINCIPAL'
+                else:
+                    st.error("❌ A planilha de Equipes não possui a coluna 'LEVANTADOR', 'COLABORADOR' ou 'NOME'.")
             except Exception as e:
                 st.error(f"Erro ao ler a planilha: {e}")
 
