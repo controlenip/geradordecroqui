@@ -82,44 +82,55 @@ st.markdown("""
         color: #28a745;
     }
 
-    /* CARDS DE MÉTRICAS CUSTOMIZADOS */
+    /* CARDS DE MÉTRICAS CUSTOMIZADOS (NOVO VISUAL) */
     .metric-card {
         background: #ffffff;
         border: 1px solid #e0e0e0;
         border-radius: 10px;
         padding: 16px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         display: flex;
         align-items: center;
-        gap: 14px;
+        gap: 16px;
         margin-bottom: 10px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(0,0,0,0.1);
     }
     .metric-icon {
-        font-size: 28px;
-        padding: 10px;
-        background: rgba(0, 112, 192, 0.1);
-        border-radius: 8px;
+        font-size: 26px;
+        padding: 12px;
+        border-radius: 10px;
         display: flex;
         align-items: center;
         justify-content: center;
     }
     .metric-content .metric-title {
-        font-size: 12px;
-        font-weight: 600;
+        font-size: 13px;
+        font-weight: 700;
         color: #6c757d;
         text-transform: uppercase;
         letter-spacing: 0.5px;
+        margin-bottom: 2px;
     }
     .metric-content .metric-value {
-        font-size: 20px;
-        font-weight: 700;
-        color: #1A4F7C;
+        font-size: 26px;
+        font-weight: 800;
+        color: #212529;
     }
 
+    /* MODO ESCURO (CLARO E ELEGANTE) */
     @media (prefers-color-scheme: dark) {
-        .stepper-container { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.08); }
-        .metric-card { background: #1e1e1e; border-color: #333333; }
-        .metric-content .metric-value { color: #64B5F6; }
+        .stepper-container { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.1); }
+        .metric-card { 
+            background: #262730; /* Fundo acinzentado nativo do Streamlit */
+            border-color: #333c47; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2); 
+        }
+        .metric-content .metric-title { color: #a0aab5; }
+        .metric-content .metric-value { color: #ffffff; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -490,7 +501,7 @@ def view_roteirizador():
         df_real_tasks = df_routed[~df_routed['PROTOCOLO'].isin(['RETORNO_BASE', 'PAUSA_ALMOCO'])]
         
         # =============================================================
-        # CARDS DE MÉTRICAS (DASHBOARD PREMIUM)
+        # CARDS DE MÉTRICAS (DASHBOARD PREMIUM COM BORDAS COLORIDAS)
         # =============================================================
         tot_obras = len(df_real_tasks)
         tot_equipes = df_routed['BASE_ATRIBUIDA'].nunique()
@@ -500,8 +511,8 @@ def view_roteirizador():
         c_m1, c_m2, c_m3, c_m4 = st.columns(4)
         with c_m1:
             st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-icon">📌</div>
+            <div class="metric-card" style="border-left: 5px solid #3b82f6;">
+                <div class="metric-icon" style="background: rgba(59, 130, 246, 0.15);">📌</div>
                 <div class="metric-content">
                     <div class="metric-title">Obras Roteirizadas</div>
                     <div class="metric-value">{tot_obras}</div>
@@ -510,8 +521,8 @@ def view_roteirizador():
             """, unsafe_allow_html=True)
         with c_m2:
             st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-icon">👥</div>
+            <div class="metric-card" style="border-left: 5px solid #8b5cf6;">
+                <div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👥</div>
                 <div class="metric-content">
                     <div class="metric-title">Equipes em Campo</div>
                     <div class="metric-value">{tot_equipes}</div>
@@ -520,8 +531,8 @@ def view_roteirizador():
             """, unsafe_allow_html=True)
         with c_m3:
             st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-icon">🛣️</div>
+            <div class="metric-card" style="border-left: 5px solid #10b981;">
+                <div class="metric-icon" style="background: rgba(16, 185, 129, 0.15);">🛣️</div>
                 <div class="metric-content">
                     <div class="metric-title">KM Total Projetado</div>
                     <div class="metric-value">{tot_km}</div>
@@ -530,8 +541,8 @@ def view_roteirizador():
             """, unsafe_allow_html=True)
         with c_m4:
             st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-icon">🚨</div>
+            <div class="metric-card" style="border-left: 5px solid #ef4444;">
+                <div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">🚨</div>
                 <div class="metric-content">
                     <div class="metric-title">Prioridades</div>
                     <div class="metric-value">{tot_prio}</div>
