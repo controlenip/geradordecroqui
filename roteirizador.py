@@ -55,12 +55,14 @@ st.markdown("""
     .block-container { padding-top: 1.2rem !important; padding-bottom: 2rem !important; }
     .stSelectbox label, .stFileUploader label, .stRadio label, .stNumberInput label, .stMultiSelect label { font-size: 14px !important; font-weight: 600 !important; color: #1A4F7C !important; }
 
-    /* STEPPER DE PROGRESSO */
+    /* STEPPER DE PROGRESSO AJUSTADO (CENTRALIZADO E FLUIDO) */
     .stepper-container {
         display: flex;
-        justify-content: space-between;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 2.5rem;
         margin-bottom: 1.5rem;
-        padding: 0.75rem 1rem;
+        padding: 0.85rem 1.2rem;
         background: rgba(26, 79, 124, 0.05);
         border-radius: 8px;
         border: 1px solid rgba(26, 79, 124, 0.1);
@@ -72,6 +74,7 @@ st.markdown("""
         display: flex;
         align-items: center;
         gap: 6px;
+        white-space: nowrap;
     }
     .step-item.active {
         color: #0070C0;
@@ -1036,9 +1039,6 @@ def view_roteirizador():
         st.markdown("### 👥 1. Levantadores Principais")
         df_bases = pd.DataFrame()
 
-        # =============================================================
-        # DELIMITAÇÃO VISUAL POR CONTAINERS (ILHAS DE INFORMAÇÃO)
-        # =============================================================
         with st.container():
             st.markdown('<div class="upload-box">', unsafe_allow_html=True)
             base_file = st.file_uploader("Suba a planilha Levantadores_MA", type=["xlsx", "xls"])
