@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pydeck as pdk
+import folium
+from folium.plugins import MarkerCluster, HeatMap
+from streamlit_folium import st_folium
 import io
 import zipfile
 import html
@@ -135,12 +137,7 @@ def haversine_vectorized(lat1, lon1, lat2, lon2):
     return R * c
 
 def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg):
-    """
-    Motor OR-Tools VRP. 
-    Resolve múltiplas rotas respeitando limites de capacidade.
-    Nesta versão, permitimos que ele IGNORE nós se estiverem muito distantes,
-    evitando que o sistema quebre caso os limites sejam muito rígidos.
-    """
+    """Motor OR-Tools VRP."""
     if not lista_obras: return []
     
     coords = [(base_lat, base_lon)] + [(r['LATITUDE'], r['LONGITUDE']) for r in lista_obras]
@@ -194,8 +191,6 @@ def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg):
         True,  
         'Capacity')
 
-    # === CORREÇÃO CRÍTICA ===
-    # Permite que o motor "Abandone" pontos que não cabem no tempo, em vez de falhar e retornar Vazio.
     penalty = 10000000 
     for node in range(1, len(distance_matrix)):
         routing.AddDisjunction([manager.NodeToIndex(node)], penalty)
@@ -258,6 +253,16 @@ def obter_rota_ruas(lat1, lon1, lat2, lon2, url_osrm_base, vel_fallback_kmh=30):
     dist_km = haversine_vectorized(lat1, lon1, lat2, lon2)
     return [[lon1, lat1], [lon2, lat2]], (dist_km / vel_fallback_kmh) * 3600
 
+def identificar_icone_folium(row, colunas):
+    tipo_str = str(row.get('TIPO LIGACAO', '')) + str(row.get('SERVICO', '')) + str(row.get('TIPO NOTA', ''))
+    tipo_str = tipo_str.upper()
+    if row.get('PROTOCOLO') == 'RETORNO_BASE': return 'home'
+    if row.get('PROTOCOLO') == 'PAUSA_ALMOCO': return 'cutlery'
+    if 'NOVA' in tipo_str or 'LIGACAO' in tipo_str or 'UNI' in tipo_str or 'UNR' in tipo_str: return 'bolt'
+    if 'MANUT' in tipo_str or 'REPARO' in tipo_str: return 'wrench'
+    if 'INSP' in tipo_str or 'VISTORIA' in tipo_str: return 'eye-open'
+    return 'info-sign'
+
 def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
     df_export = df.copy()
     if 'PROTOCOLO' in df_export.columns:
@@ -299,7 +304,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
             else:
                 ws.column_dimensions[col_letter].width = 18.0
                 
-            if col_name_upper in ['ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE']:
+            if col_name_upper in ['ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE']:
                 col_types[col_idx] = center_align
             else:
                 col_types[col_idx] = left_align
@@ -408,9 +413,6 @@ def view_roteirizador():
     status_exec = st.session_state.vrp_status
     is_done = st.session_state.roteamento_concluido
     
-    # -------------------------------------------------------------
-    # PREVENÇÃO DE FALHA SILENCIOSA
-    # -------------------------------------------------------------
     if is_done:
         if st.session_state.df_routed.empty:
             st.error("🚨 Nenhuma rota pôde ser gerada! Isso geralmente ocorre porque o limite de obras, km ou carga horária é muito pequeno para alocar até mesmo uma única demanda (ou as obras estão distantes demais da equipe).")
@@ -428,7 +430,7 @@ def view_roteirizador():
         <div class="{s1_class}">📁 1. Upload de Dados</div>
         <div class="{s2_class}">⚙️ 2. Filtros e Configuração</div>
         <div class="{s3_class}">🚀 3. Roteirização Inteligente (OR-Tools)</div>
-        <div class="{s4_class}">🎯 4. Resultados e Mapas (PyDeck 3D)</div>
+        <div class="{s4_class}">🎯 4. Resultados e Mapas</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -470,13 +472,23 @@ def view_roteirizador():
         st.markdown("## 🎯 Resultados da Roteirização Corporativa")
         st.info("Dê um **duplo clique** nas células abaixo para alterar o responsável ou a ordem das obras.")
         
+        # === RESTAURAÇÃO DA COLUNA DISTANCIA PROXIMO PONTO NO EDITOR ===
         df_editado_ui = st.data_editor(
             st.session_state.df_routed, use_container_width=True,
-            column_config={ "ROTA_GEOMETRIA": None, "LATITUDE": st.column_config.NumberColumn(disabled=True), "LONGITUDE": st.column_config.NumberColumn(disabled=True) }
+            column_config={ 
+                "ROTA_GEOMETRIA": None, 
+                "LATITUDE": st.column_config.NumberColumn(disabled=True), 
+                "LONGITUDE": st.column_config.NumberColumn(disabled=True),
+                "DISTANCIA_PONTO_ANTERIOR_KM": st.column_config.NumberColumn(disabled=True),
+                "DISTANCIA_PROXIMO_PONTO_KM": st.column_config.NumberColumn(disabled=True),
+                "TEMPO_VIAGEM_MINUTOS": st.column_config.NumberColumn(disabled=True)
+            }
         )
         
         df_routed = df_editado_ui.copy()
         bases_records = st.session_state.bases_records
+        tipo_periodo = st.session_state.tipo_periodo
+        colunas_exibir = st.session_state.colunas_exibir
         df_real_tasks = df_routed[~df_routed['PROTOCOLO'].isin(['RETORNO_BASE', 'PAUSA_ALMOCO'])]
         
         tot_obras = len(df_real_tasks)
@@ -491,40 +503,81 @@ def view_roteirizador():
         c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">🚨</div><div class="metric-content"><div class="metric-title">Prioridades</div><div class="metric-value">{tot_prio}</div></div></div>', unsafe_allow_html=True)
 
         st.markdown("---")
+        st.markdown("### 📊 Dashboards de Produtividade")
+        c_dash1, c_dash2 = st.columns(2)
+        with c_dash1:
+            st.markdown("##### 📦 Volume de Obras por Equipe")
+            st.bar_chart(df_real_tasks['BASE_ATRIBUIDA'].value_counts(), color="#1A4F7C")
+        with c_dash2:
+            st.markdown("##### 🛣️ Quilometragem Projetada por Equipe")
+            st.bar_chart(df_routed.groupby('BASE_ATRIBUIDA')['DISTANCIA_PONTO_ANTERIOR_KM'].sum(), color="#FF4B4B")
+        st.markdown("---")
         
-        st.markdown("#### 🗺️ Visualização Geográfica do Plano (Aceleração 3D WebGL)")
+        # === RESTAURAÇÃO DO MAPA FOLIUM COM POP-UPS ===
+        st.markdown("#### 🗺️ Visualização Geográfica do Plano")
+        mapa = folium.Map(location=[df_routed['LATITUDE'].mean(), df_routed['LONGITUDE'].mean()], zoom_start=8) if not df_routed.empty else folium.Map(location=[-5.2, -45.0], zoom_start=7)
         
-        df_pontos_mapa = df_real_tasks.copy()
-        df_pontos_mapa['color_r'] = df_pontos_mapa['PRIORIDADE'].apply(lambda x: 255 if x == 'Sim' else 0)
-        df_pontos_mapa['color_g'] = 100
-        df_pontos_mapa['color_b'] = df_pontos_mapa['PRIORIDADE'].apply(lambda x: 0 if x == 'Sim' else 255)
+        cores_folium = ['#e6194b', '#00bcd4', '#3f51b5', '#009688', '#ff9800', '#9c27b0', '#cddc39', '#e91e63', '#ffeb3b', '#795548']
+        lista_bases_mapa = df_routed['BASE_ATRIBUIDA'].unique().tolist()
         
-        layer_pontos = pdk.Layer(
-            "ScatterplotLayer",
-            data=df_pontos_mapa,
-            get_position='[LONGITUDE, LATITUDE]',
-            get_fill_color='[color_r, color_g, color_b, 180]',
-            get_radius=150,
-            pickable=True,
-        )
+        heat_data = [[r['LATITUDE'], r['LONGITUDE']] for _, r in df_real_tasks.iterrows()]
+        HeatMap(heat_data, name="🔥 Mapa de Calor (Demandas)", radius=15, blur=10).add_to(mapa)
+        
+        marker_cluster = MarkerCluster(name="Obras (Agrupadas)").add_to(mapa)
+        
+        for base_nome in lista_bases_mapa:
+            idx_cor = lista_bases_mapa.index(base_nome)
+            cor_rota = cores_folium[idx_cor % len(cores_folium)]
+            df_base_rota = df_routed[df_routed['BASE_ATRIBUIDA'] == base_nome]
+            base_ref = next((b for b in bases_records if b['LEVANTADOR'] == base_nome), None)
+            b_lat, b_lon = float(str(base_ref['LATITUDE']).replace(',','.')), float(str(base_ref['LONGITUDE']).replace(',','.'))
+            folium.Marker([b_lat, b_lon], icon=folium.Icon(color='black', icon='home', prefix='fa'), tooltip=f"Base: {base_nome}").add_to(mapa)
+            
+            for periodo_val in df_base_rota['PERIODO'].unique():
+                df_periodo = df_base_rota[df_base_rota['PERIODO'] == periodo_val]
+                fg_linhas = folium.FeatureGroup(name=f"Linhas {base_nome} | P: {periodo_val}", show=False)
+                
+                pontos_linha_folium = []
+                for _, r in df_periodo.iterrows():
+                    if isinstance(r.get('ROTA_GEOMETRIA'), list):
+                        for lon, lat in r['ROTA_GEOMETRIA']: pontos_linha_folium.append([lat, lon]) 
+                            
+                folium.PolyLine(pontos_linha_folium, color='black', weight=7, opacity=0.9).add_to(fg_linhas)
+                folium.PolyLine(pontos_linha_folium, color=cor_rota, weight=3, opacity=1.0).add_to(fg_linhas)
+                fg_linhas.add_to(mapa)
+                
+                for _, r in df_periodo.iterrows():
+                    if r['PROTOCOLO'] in ['RETORNO_BASE', 'PAUSA_ALMOCO']: continue
+                    icone = identificar_icone_folium(r, df_routed.columns)
+                    cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
+                    
+                    pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0070C0"
+                    pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
+                    
+                    extra_rows = ""
+                    for c in colunas_exibir:
+                        if c in r: extra_rows += f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>{c}:</td><td style='padding:3px 6px; color:#333;'>{r[c]}</td></tr>"
 
-        df_linhas_mapa = df_routed[df_routed['ROTA_GEOMETRIA'].notna()].copy()
-        layer_linhas = pdk.Layer(
-            "PathLayer",
-            data=df_linhas_mapa,
-            get_path="ROTA_GEOMETRIA",
-            get_color=[26, 79, 124, 200],
-            width_scale=20,
-            width_min_pixels=3,
-        )
-
-        view_state = pdk.ViewState(latitude=df_routed['LATITUDE'].mean(), longitude=df_routed['LONGITUDE'].mean(), zoom=7, pitch=45)
-        r_deck = pdk.Deck(
-            layers=[layer_linhas, layer_pontos],
-            initial_view_state=view_state,
-            tooltip={"html": "<b>Protocolo:</b> {PROTOCOLO}<br/><b>Equipe:</b> {BASE_ATRIBUIDA}<br/><b>Prioridade:</b> {PRIORIDADE}", "style": {"backgroundColor": "steelblue", "color": "white"}}
-        )
-        st.pydeck_chart(r_deck)
+                    popup_html = f"""
+                    <div style="font-family:sans-serif; width:260px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
+                        <div style="background:{pop_header_bg}; color:white; padding:8px 10px; font-size:13px; font-weight:bold;">
+                            {pop_prio_txt}
+                        </div>
+                        <div style="padding:10px; background:#fafafa; font-size:12px;">
+                            <table style="width:100%; border-collapse:collapse;">
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Protocolo:</td><td style="padding:3px 6px; color:#333;">{r.get('PROTOCOLO', 'N/A')}</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Tempo Est.:</td><td style="padding:3px 6px; color:#333;">{r.get('TEMPO_VIAGEM_MINUTOS', 0)} Min</td></tr>
+                                {extra_rows}
+                            </table>
+                        </div>
+                    </div>
+                    """
+                    folium.Marker([r['LATITUDE'], r['LONGITUDE']], icon=folium.Icon(color=cor_icone, icon=icone), popup=folium.Popup(popup_html, max_width=300)).add_to(marker_cluster)
+        
+        folium.LayerControl().add_to(mapa)
+        st_folium(mapa, use_container_width=True, height=550, returned_objects=[])
 
         st.markdown("#### 📥 Baixar Resultados e Integrações")
         data_atual = datetime.now().strftime("%d_%m_%Y")
@@ -646,7 +699,13 @@ def view_roteirizador():
         
         if state['b_idx'] >= len(state['b_names']):
             status_text.success("✅ Otimização Concluída!")
-            st.session_state.df_routed = pd.DataFrame(state['routed_data'])
+            
+            # === RESTAURAÇÃO DO CÁLCULO DA DISTÂNCIA PARA O PRÓXIMO PONTO ===
+            df_final_route = pd.DataFrame(state['routed_data'])
+            if not df_final_route.empty:
+                df_final_route['DISTANCIA_PROXIMO_PONTO_KM'] = df_final_route.groupby(['BASE_ATRIBUIDA', 'PERIODO'])['DISTANCIA_PONTO_ANTERIOR_KM'].shift(-1).fillna(0.0)
+            
+            st.session_state.df_routed = df_final_route
             st.session_state.roteamento_concluido = True
             st.session_state.vrp_status = "IDLE"
             st.rerun()
