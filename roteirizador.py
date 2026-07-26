@@ -214,9 +214,11 @@ def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg, url_osrm_bas
     demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
     routing.AddDimensionWithVehicleCapacity(demand_callback_index, 0, capacities, True, 'Capacity')
 
-    penalty = 10000000 
-    for node in range(1, len(distance_matrix)):
-        routing.AddDisjunction([manager.NodeToIndex(node)], penalty)
+    # CORREÇÃO CRÍTICA: Aplica multa de 50.000.000 para notas PRIORITÁRIAS, forçando a IA a roteirizá-las
+    for idx, r in enumerate(lista_obras):
+        node_index = manager.NodeToIndex(idx + 1)
+        penalty = 50000000 if r.get('PRIORIDADE') == 'Sim' else 10000000
+        routing.AddDisjunction([node_index], penalty)
 
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
@@ -241,7 +243,6 @@ def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg, url_osrm_bas
     return rotas_por_periodo
 
 def kmeans_clustering(coords, k, max_iters=100):
-    """Agrupamento Geográfico. Separa pontos próximos em K grupos (Zonas)."""
     np.random.seed(42)
     unique_coords = np.unique(coords, axis=0)
     if len(unique_coords) < k: k = len(unique_coords)
@@ -1064,7 +1065,7 @@ def view_roteirizador():
 
     if df_tasks.empty: return
 
-    # === ALOCAÇÃO TERRITORIAL ===
+    # === ALOCAÇÃO TERRITORIAL (UNIFICADA) ===
     df_tasks_alocadas = pd.DataFrame()
     bases_principais_records = df_bases.to_dict('records') if not df_bases.empty else []
     bases_temporarias_records = df_bases_temp.to_dict('records') if not df_bases_temp.empty else []
@@ -1072,8 +1073,6 @@ def view_roteirizador():
     
     if len(todas_bases_records) > 0:
         df_tasks['BASE_ATRIBUIDA'] = "NÃO ALOCADO"
-        df_prio = df_tasks[df_tasks['PRIORIDADE'] == 'Sim'].copy()
-        df_comum = df_tasks[df_tasks['PRIORIDADE'] == 'Não'].copy()
         
         if tipo_atribuicao == "Clusterização Inteligente por IA (K-Means)":
             def allocate_kmeans(df_subset, base_list):
@@ -1104,9 +1103,7 @@ def view_roteirizador():
                         df_subset.loc[idx, 'BASE_ATRIBUIDA'] = best_b
                 return df_subset
 
-            df_prio = allocate_kmeans(df_prio, bases_principais_records)
-            df_comum = allocate_kmeans(df_comum, todas_bases_records)
-            df_tasks = pd.concat([df_prio, df_comum])
+            df_tasks = allocate_kmeans(df_tasks, todas_bases_records)
 
         elif tipo_atribuicao == "Por Proximidade Geográfica das Coordenadas (Ignora texto)":
             def get_nearest_base(lat, lon, base_list):
@@ -1118,12 +1115,9 @@ def view_roteirizador():
                         if d < min_dist: min_dist, best_base = d, b['LEVANTADOR']
                 return best_base if best_base else "NÃO ALOCADO"
                 
-            df_prio['BASE_ATRIBUIDA'] = df_prio.apply(lambda r: get_nearest_base(r['LATITUDE'], r['LONGITUDE'], bases_principais_records), axis=1)
-            df_comum['BASE_ATRIBUIDA'] = df_comum.apply(lambda r: get_nearest_base(r['LATITUDE'], r['LONGITUDE'], todas_bases_records), axis=1)
-            df_tasks = pd.concat([df_prio, df_comum])
+            df_tasks['BASE_ATRIBUIDA'] = df_tasks.apply(lambda r: get_nearest_base(r['LATITUDE'], r['LONGITUDE'], todas_bases_records), axis=1)
 
         elif tipo_atribuicao == "Por Municípios Atendidos (Lê texto da planilha)":
-            mun_to_main = {}
             mun_to_all = {}
             for b in todas_bases_records:
                 for m in str(b.get('MUNICIPIO', '')).split(','):
@@ -1131,9 +1125,6 @@ def view_roteirizador():
                     if m_limpo:
                         if m_limpo not in mun_to_all: mun_to_all[m_limpo] = []
                         mun_to_all[m_limpo].append(b['LEVANTADOR'])
-                        if b.get('TIPO_EQUIPE') == 'PRINCIPAL':
-                            if m_limpo not in mun_to_main: mun_to_main[m_limpo] = []
-                            mun_to_main[m_limpo].append(b['LEVANTADOR'])
             
             def allocate_by_mun_divided(df_sub, map_dict):
                 if df_sub.empty: return df_sub
@@ -1147,7 +1138,6 @@ def view_roteirizador():
                         if n_bases == 1:
                             df_sub.loc[group.index, 'BASE_ATRIBUIDA'] = bases_disp[0]
                         else:
-                            # MUDANÇA: Micro-Zoneamento Geográfico usando IA (K-Means)
                             coords = group[['LATITUDE', 'LONGITUDE']].values
                             k_real = min(n_bases, len(np.unique(coords, axis=0)))
                             if k_real > 1:
@@ -1157,14 +1147,12 @@ def view_roteirizador():
                                 df_sub.loc[group.index, 'BASE_ATRIBUIDA'] = bases_disp[0]
                 return df_sub.drop(columns=['MUN_LIMPO'])
                 
-            df_prio = allocate_by_mun_divided(df_prio, mun_to_main)
-            df_comum = allocate_by_mun_divided(df_comum, mun_to_all)
-            df_tasks = pd.concat([df_prio, df_comum])
+            df_tasks = allocate_by_mun_divided(df_tasks, mun_to_all)
 
         df_unallocated = df_tasks[df_tasks['BASE_ATRIBUIDA'] == "NÃO ALOCADO"]
         df_tasks_alocadas = df_tasks[df_tasks['BASE_ATRIBUIDA'] != "NÃO ALOCADO"].copy()
 
-        if df_tasks_alocadas.empty: st.error("Nenhuma obra encotrou equipes na região."); return
+        if df_tasks_alocadas.empty: st.error("Nenhuma obra encontrou equipes na região."); return
         if not df_unallocated.empty: st.warning(f"⚠️ {len(df_unallocated)} obras não encontraram cobertura e ficaram sem Levantador.")
             
         bases_records = todas_bases_records 
@@ -1183,7 +1171,7 @@ def view_roteirizador():
             cols_desejadas = ['PROTOCOLO', 'NOME', 'ENDEREÇO', 'MUNICIPIO', 'LATITUDE', 'LONGITUDE', 'TIPO NOTA']
             cols_padrao = [c for c in normalize_cols(cols_desejadas) if c in todas_cols]
             colunas_exibir = c_ex1.multiselect("Colunas Visíveis nos Cartões (KML/Mapa)", todas_cols, default=cols_padrao)
-            c_ex2.info(f"⚡ **Prioridade Ativa:** Obras de urgência ({', '.join(TIPOS_PRIORITARIOS)}) recebem pinos vermelhos e forçam o algoritmo a incluí-las nos roteiros primários.")
+            c_ex2.info(f"⚡ **Prioridade Ativa:** Obras de urgência ({', '.join(TIPOS_PRIORITARIOS)}) recebem pinos vermelhos e possuem peso maior na IA para evitar descarte.")
             col_prioridade = "TIPO NOTA"
 
     if st.button("🚀 Iniciar Motor de Roteirização (OR-Tools)", type="primary", use_container_width=True):
