@@ -35,7 +35,7 @@ def get_retry_session(retries=3, backoff_factor=0.5):
     retry = Retry(
         total=retries, read=retries, connect=retries,
         backoff_factor=backoff_factor,
-        status_forcelist=(429, 500, 502, 503, 504) # Erros comuns de instabilidade
+        status_forcelist=(429, 500, 502, 503, 504)
     )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount('http://', adapter)
@@ -47,11 +47,89 @@ http_session = get_retry_session()
 # Configuração da Página (Deve ser a primeira linha executável do app isolado)
 st.set_page_config(page_title="Roteirizador Operacional", page_icon="🚙", layout="wide")
 
-# Injeção de CSS
+# ==========================================
+# INJEÇÃO DE CSS GLOBAL & COMPONENTES PREMIUM
+# ==========================================
 st.markdown("""
 <style>
-    .block-container { padding-top: 1.5rem !important; padding-bottom: 2rem !important; }
+    .block-container { padding-top: 1.2rem !important; padding-bottom: 2rem !important; }
     .stSelectbox label, .stFileUploader label, .stRadio label, .stNumberInput label, .stMultiSelect label { font-size: 14px !important; font-weight: 600 !important; color: #1A4F7C !important; }
+
+    /* STEPPER DE PROGRESSO */
+    .stepper-container {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 1.5rem;
+        padding: 0.75rem 1rem;
+        background: rgba(26, 79, 124, 0.05);
+        border-radius: 8px;
+        border: 1px solid rgba(26, 79, 124, 0.1);
+    }
+    .step-item {
+        font-size: 13px;
+        font-weight: 600;
+        color: #6c757d;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .step-item.active {
+        color: #0070C0;
+    }
+    .step-item.done {
+        color: #28a745;
+    }
+
+    /* CARDS DE MÉTRICAS CUSTOMIZADOS */
+    .metric-card {
+        background: #ffffff;
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 16px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 10px;
+    }
+    .metric-icon {
+        font-size: 28px;
+        padding: 10px;
+        background: rgba(0, 112, 192, 0.1);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .metric-content .metric-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .metric-content .metric-value {
+        font-size: 20px;
+        font-weight: 700;
+        color: #1A4F7C;
+    }
+
+    /* CONTAINERS DE UPLOAD (ILHAS DE INFORMAÇÃO) */
+    .upload-box {
+        background: #fdfdfd;
+        border: 1px solid #dcdcdc;
+        border-radius: 10px;
+        padding: 18px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.01);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .stepper-container { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.08); }
+        .metric-card { background: #1e1e1e; border-color: #333333; }
+        .metric-content .metric-value { color: #64B5F6; }
+        .upload-box { background: #161a1e; border-color: #2c3238; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -208,7 +286,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
     if colunas_originais:
         cols_atuais = df_export.columns.tolist()
         cols_originais_validas = [c for c in colunas_originais if c in cols_atuais]
-        cols_novas_geradas = [c for c in cols_atuais if c not in colunas_originais]
+        cols_novas_geradas = [c for c in cols_atuais if c not in cols_originais]
         df_export = df_export[cols_originais_validas + cols_novas_geradas]
         
     buf_xl = io.BytesIO()
@@ -216,26 +294,21 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
         df_export.to_excel(writer, index=False, sheet_name='Roteiro')
         ws = writer.sheets['Roteiro']
         
-        # --- FORMATAÇÃO PADRÃO CORPORATIVA (Geral e Individual) ---
         header_fill = PatternFill(start_color='0070C0', end_color='0070C0', fill_type='solid')
         header_font = Font(color='FFFFFF', bold=True)
         center_align = Alignment(horizontal='center', vertical='center')
         left_align = Alignment(horizontal='left', vertical='center')
         
-        # 1. Formatar Cabeçalho
         for cell in ws[1]:
             cell.fill = header_fill
             cell.font = header_font
             cell.alignment = center_align
             
         col_types = {}
-        
-        # 2. Formatar Larguras das Colunas e Mapear Alinhamento
         for col_idx, col_name in enumerate(df_export.columns, 1):
             col_letter = get_column_letter(col_idx)
             col_name_upper = str(col_name).upper()
             
-            # Larguras inteligentes
             if any(x in col_name_upper for x in ['NOME', 'CLIENTE', 'ENDEREÇO', 'ENDERECO', 'INFORMAÇ', 'INFORMAC', 'DESCRIC']):
                 ws.column_dimensions[col_letter].width = 45.0
             elif any(x in col_name_upper for x in ['PROTOCOLO', 'MUNICIPIO', 'BASE', 'LOCALIDADE']):
@@ -243,13 +316,11 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
             else:
                 ws.column_dimensions[col_letter].width = 18.0
                 
-            # Alinhamento
             if col_name_upper in ['ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE', 'LATITUDE', 'LONGITUDE']:
                 col_types[col_idx] = center_align
             else:
                 col_types[col_idx] = left_align
 
-        # 3. Aplicar Fontes Especiais e Alinhamentos nas Linhas de Dados
         red_font = Font(color="FF0000", bold=True)
         prio_idx = df_export.columns.get_loc('PRIORIDADE') + 1 if 'PRIORIDADE' in df_export.columns else None
         prio_target_idx = df_export.columns.get_loc(col_prioridade) + 1 if col_prioridade in df_export.columns else None
@@ -259,7 +330,6 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
                 cell = ws.cell(row=row_idx, column=col_idx)
                 cell.alignment = col_types.get(col_idx, left_align)
                 
-            # Regra de Fonte Vermelha para Obras Prioritárias
             if prio_idx and ws.cell(row=row_idx, column=prio_idx).value == "Sim":
                 ws.cell(row=row_idx, column=prio_idx).font = red_font
                 if prio_target_idx and col_prioridade != "Nenhuma":
@@ -290,21 +360,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
   <Style id="icon-yellow"><IconStyle><scale>1.3</scale><Icon><href>https://maps.google.com/mapfiles/kml/shapes/dining.png</href></Icon><LabelStyle><scale>1.0</scale></LabelStyle></IconStyle></Style>
 '''
 
-    # Paleta Dinâmica de Cores KML (AABBGGRR) para diferenciar cada Levantador
-    kml_cores = [
-        'ff4b19e6', # Vermelho
-        'ffd4bc00', # Cyan (Ciano)
-        'ffb5513f', # Indigo (Azul Escuro)
-        'ff889600', # Teal (Verde Água)
-        'ff0098ff', # Laranja
-        'ffb0279c', # Roxo
-        'ff39dccd', # Verde Limão
-        'ff631ee9', # Magenta
-        'ff3bebff', # Amarelo Ouro
-        'ff485579'  # Marrom
-    ]
-    
-    # Cria os estilos de linha coloridos para cada levantador que existe no painel
+    kml_cores = ['ff4b19e6', 'ffd4bc00', 'ffb5513f', 'ff889600', 'ff0098ff', 'ffb0279c', 'ff39dccd', 'ff631ee9', 'ff3bebff', 'ff485579']
     for idx, b_nome in enumerate(lista_todas_bases):
         cor_kml = kml_cores[idx % len(kml_cores)]
         nome_limpo = re.sub(r'[^A-Za-z0-9_]', '', str(b_nome))
@@ -315,7 +371,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
         base_ref = next((b for b in bases_records if b['LEVANTADOR'] == base_nome), None)
         b_lat, b_lon = float(str(base_ref['LATITUDE']).replace(',','.')), float(str(base_ref['LONGITUDE']).replace(',','.'))
         res_nome = str(base_ref.get('RESIDENCIA', base_nome))
-        
         nome_limpo_base = re.sub(r'[^A-Za-z0-9_]', '', str(base_nome))
 
         kml += f'  <Folder>\n    <name>Levantador: {html.escape(str(base_nome))}</name>\n'
@@ -332,7 +387,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                 coords_linha_kml = ""
                 for _, row in df_dia.iterrows():
                     lon, lat = str(row['LONGITUDE']).replace(',','.'), str(row['LATITUDE']).replace(',','.')
-                    desc_parts = [f"<b>Ordem na Rota:</b> {row.get('ORDEM', 0)}", f"<b>Distância do Ponto Anterior:</b> {row.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM", f"<b>Distância do Próximo Ponto:</b> {row.get('DISTANCIA_PROXIMO_PONTO_KM', 0)} KM", f"<b>Tempo de Viagem Estimado:</b> {row.get('TEMPO_VIAGEM_MINUTOS', 0)} Minutos"]
+                    desc_parts = [f"<b>Ordem na Rota:</b> {row.get('ORDEM', 0)}", f"<b>Distância Anterior:</b> {row.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM", f"<b>Tempo Viagem:</b> {row.get('TEMPO_VIAGEM_MINUTOS', 0)} Min"]
                     
                     if row.get('PROTOCOLO') == 'RETORNO_BASE':
                         desc_cdata, nome_ponto, style_url = "<b>RETORNO À BASE DE ORIGEM</b>", "🏠 FIM DO DIA - RETORNO", "#icon-green"
@@ -353,7 +408,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         coords_linha_kml += f"          {lon},{lat},0\n"
 
                 kml += f'        <Placemark><name>Contorno Rota</name><styleUrl>#linha-rota-contorno</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{coords_linha_kml}            </coordinates></LineString></Placemark>\n' 
-                # Aqui aplicamos a cor única do KML para o levantador
                 kml += f'        <Placemark><name>Traçado Rota</name><styleUrl>#rota-centro-{nome_limpo_base}</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{coords_linha_kml}            </coordinates></LineString></Placemark>\n      </Folder>\n' 
             kml += '    </Folder>\n' 
         kml += '  </Folder>\n' 
@@ -364,7 +418,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
 # VIEW PRINCIPAL DA PÁGINA
 # ==========================================
 def view_roteirizador():
-    # Inicialização de Variáveis de Estado
     if "roteamento_concluido" not in st.session_state: st.session_state.roteamento_concluido = False
     if "vrp_status" not in st.session_state: st.session_state.vrp_status = "IDLE"
     if "vrp_state" not in st.session_state: st.session_state.vrp_state = {}
@@ -375,10 +428,29 @@ def view_roteirizador():
     if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
 
     # =============================================================
+    # STEPPER DE PROGRESSO VISUAL NO TOPO
+    # =============================================================
+    status_exec = st.session_state.vrp_status
+    is_done = st.session_state.roteamento_concluido
+    
+    s1_class = "step-item done" if (status_exec != "IDLE" or is_done) else "step-item active"
+    s2_class = "step-item done" if (status_exec != "IDLE" or is_done) else "step-item active"
+    s3_class = "step-item active" if status_exec != "IDLE" else ("step-item done" if is_done else "step-item")
+    s4_class = "step-item active" if is_done else "step-item"
+    
+    st.markdown(f"""
+    <div class="stepper-container">
+        <div class="{s1_class}">📁 1. Upload de Dados</div>
+        <div class="{s2_class}">⚙️ 2. Filtros e Configuração</div>
+        <div class="{s3_class}">🚀 3. Roteirização Inteligente</div>
+        <div class="{s4_class}">🎯 4. Resultados e Mapas</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # =============================================================
     # SIDEBAR: CONFIGURAÇÕES CONSTANTES E TIMER ANIMADO
     # =============================================================
-    # Bloqueia a edição da barra se o sistema estiver rodando ou concluído
-    is_locked = st.session_state.vrp_status != "IDLE" or st.session_state.roteamento_concluido
+    is_locked = status_exec != "IDLE" or is_done
     
     with st.sidebar:
         st.markdown("### ⚙️ Gestão de Esforço Diário")
@@ -402,13 +474,12 @@ def view_roteirizador():
             limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s a roteirizar", min_value=1, value=5, step=1, disabled=is_locked)
             
         st.markdown("---")
-        # Espaço reservado para o Timer (Só aparece durante a execução)
         timer_placeholder = st.empty()
 
     # -------------------------------------------------------------
     # 1. TELA DE RESULTADOS (Após Roteirização Finalizada)
     # -------------------------------------------------------------
-    if st.session_state.roteamento_concluido and not st.session_state.df_routed.empty:
+    if is_done and not st.session_state.df_routed.empty:
         st.markdown("## 🎯 Resultados da Roteirização Corporativa")
         st.markdown("### ✍️ Ajuste Fino Manual (Painel do Despachante)")
         st.info("Dê um **duplo clique** nas células abaixo para alterar o responsável ou a ordem das obras. Suas edições sairão direto nos downloads finais.")
@@ -427,11 +498,55 @@ def view_roteirizador():
         
         df_real_tasks = df_routed[~df_routed['PROTOCOLO'].isin(['RETORNO_BASE', 'PAUSA_ALMOCO'])]
         
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("📌 Obras Roteirizadas", len(df_real_tasks))
-        k2.metric("👥 Equipes em Campo", df_routed['BASE_ATRIBUIDA'].nunique())
-        k3.metric("🛣️ KM Total Projetado", f"{df_routed['DISTANCIA_PONTO_ANTERIOR_KM'].sum():.1f} km")
-        k4.metric("🚨 Prioridades", len(df_real_tasks[df_real_tasks['PRIORIDADE'] == 'Sim']) if 'PRIORIDADE' in df_real_tasks else 0)
+        # =============================================================
+        # CARDS DE MÉTRICAS (DASHBOARD PREMIUM)
+        # =============================================================
+        tot_obras = len(df_real_tasks)
+        tot_equipes = df_routed['BASE_ATRIBUIDA'].nunique()
+        tot_km = f"{df_routed['DISTANCIA_PONTO_ANTERIOR_KM'].sum():.1f} km"
+        tot_prio = len(df_real_tasks[df_real_tasks['PRIORIDADE'] == 'Sim']) if 'PRIORIDADE' in df_real_tasks else 0
+
+        c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+        with c_m1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-icon">📌</div>
+                <div class="metric-content">
+                    <div class="metric-title">Obras Roteirizadas</div>
+                    <div class="metric-value">{tot_obras}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        with c_m2:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-icon">👥</div>
+                <div class="metric-content">
+                    <div class="metric-title">Equipes em Campo</div>
+                    <div class="metric-value">{tot_equipes}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        with c_m3:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-icon">🛣️</div>
+                <div class="metric-content">
+                    <div class="metric-title">KM Total Projetado</div>
+                    <div class="metric-value">{tot_km}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        with c_m4:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-icon">🚨</div>
+                <div class="metric-content">
+                    <div class="metric-title">Prioridades</div>
+                    <div class="metric-value">{tot_prio}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown("### 📊 Dashboards de Produtividade")
@@ -447,7 +562,6 @@ def view_roteirizador():
         st.markdown("#### 🗺️ Visualização Geográfica do Plano")
         mapa = folium.Map(location=[df_routed['LATITUDE'].mean(), df_routed['LONGITUDE'].mean()], zoom_start=8) if not df_routed.empty else folium.Map(location=[-5.2, -45.0], zoom_start=7)
         
-        # Paleta de Cores do Folium (Sincronizada exatamente com as cores do KML)
         cores_folium = ['#e6194b', '#00bcd4', '#3f51b5', '#009688', '#ff9800', '#9c27b0', '#cddc39', '#e91e63', '#ffeb3b', '#795548']
         lista_bases_mapa = df_routed['BASE_ATRIBUIDA'].unique().tolist()
         
@@ -482,11 +596,33 @@ def view_roteirizador():
                     icone = identificar_icone_folium(r, df_routed.columns)
                     cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
                     
-                    info_html = f"<b>Ordem:</b> {r.get('ORDEM', 0)} | <b>{tipo_periodo}:</b> {r.get('PERIODO', 0)}<br><b>Distância Próximo Ponto:</b> {r.get('DISTANCIA_PROXIMO_PONTO_KM', 0)} KM<br><b>Tempo Estimado:</b> {r.get('TEMPO_VIAGEM_MINUTOS', 0)} Min<br>"
+                    # =============================================================
+                    # POP-UPS DO MAPA (FOLIUM) MAIS ELEGANTES (MINI-CARDS HTML)
+                    # =============================================================
+                    pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0070C0"
+                    pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
+                    
+                    extra_rows = ""
                     for c in colunas_exibir:
-                        if c in r: info_html += f"<b>{c}:</b> {r[c]}<br>"
-                        
-                    folium.Marker([r['LATITUDE'], r['LONGITUDE']], icon=folium.Icon(color=cor_icone, icon=icone), popup=folium.Popup(info_html, max_width=300)).add_to(marker_cluster)
+                        if c in r: extra_rows += f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>{c}:</td><td style='padding:3px 6px; color:#333;'>{r[c]}</td></tr>"
+
+                    popup_html = f"""
+                    <div style="font-family:sans-serif; width:260px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
+                        <div style="background:{pop_header_bg}; color:white; padding:8px 10px; font-size:13px; font-weight:bold;">
+                            {pop_prio_txt}
+                        </div>
+                        <div style="padding:10px; background:#fafafa; font-size:12px;">
+                            <table style="width:100%; border-collapse:collapse;">
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Protocolo:</td><td style="padding:3px 6px; color:#333;">{r.get('PROTOCOLO', 'N/A')}</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Tempo Est.:</td><td style="padding:3px 6px; color:#333;">{r.get('TEMPO_VIAGEM_MINUTOS', 0)} Min</td></tr>
+                                {extra_rows}
+                            </table>
+                        </div>
+                    </div>
+                    """
+                    folium.Marker([r['LATITUDE'], r['LONGITUDE']], icon=folium.Icon(color=cor_icone, icon=icone), popup=folium.Popup(popup_html, max_width=300)).add_to(marker_cluster)
         
         folium.LayerControl().add_to(mapa)
         st_folium(mapa, use_container_width=True, height=550, returned_objects=[])
@@ -518,7 +654,6 @@ def view_roteirizador():
                     'KM TOTAL PREVISTO': round(total_km, 2)
                 })
 
-            # Formatação do Excel de Resumo (Estilo Nativo)
             buf_resumo_lev = io.BytesIO()
             with pd.ExcelWriter(buf_resumo_lev, engine='openpyxl') as writer:
                 df_resumo = pd.DataFrame(resumo_levantadores)
@@ -555,9 +690,7 @@ def view_roteirizador():
 
         buf_zip_kml = io.BytesIO()
         with zipfile.ZipFile(buf_zip_kml, 'w', zipfile.ZIP_DEFLATED) as zip_kml:
-            # Enviamos a lista mestra de bases para que as cores do KML sejam consistentes
             lista_bases_geral = df_routed['BASE_ATRIBUIDA'].unique().tolist()
-            
             zip_kml.writestr(f"Rota_Geral_{data_atual}.kml", gerar_kml_agrupado(df_routed, bases_records, f"Rota_Geral_{data_atual}", colunas_exibir, lista_bases_geral).encode('utf-8'))
             mapas_gerados = [f"Rota_Geral_{data_atual}.kml"]
             
@@ -584,12 +717,12 @@ def view_roteirizador():
     # -------------------------------------------------------------
     # 2. MÁQUINA DE ESTADOS - ROTEAMENTO CONTÍNUO E BATCH
     # -------------------------------------------------------------
-    if st.session_state.vrp_status in ["RUNNING", "PAUSED"]:
+    if status_exec in ["RUNNING", "PAUSED"]:
         st.markdown("## 🚀 Execução do Motor de Roteirização")
         st.markdown("O sistema está conectando via satélite para agrupar e traçar os percursos.")
         
         c1, c2 = st.columns(2)
-        if st.session_state.vrp_status == "RUNNING":
+        if status_exec == "RUNNING":
             if c1.button("⏸️ Pausar Roteirização", use_container_width=True):
                 st.session_state.vrp_status = "PAUSED"
                 st.rerun()
@@ -610,7 +743,6 @@ def view_roteirizador():
         
         st.progress(progresso)
         
-        # === CÁLCULO E EXIBIÇÃO DO TIMER ANIMADO NA BARRA LATERAL ===
         if state['obras_processadas'] > 0:
             avg = state['tempo_processamento'] / state['obras_processadas']
             restantes = total - state['obras_processadas']
@@ -695,7 +827,6 @@ def view_roteirizador():
                 </div>
                 """, unsafe_allow_html=True)
         
-        # === FLUXO DE EXECUÇÃO DA IA ===
         if st.session_state.vrp_status == "RUNNING":
             agora = time.time()
             state['tempo_processamento'] += (agora - state['last_time'])
@@ -803,7 +934,6 @@ def view_roteirizador():
 
             elif state['fase'] == 'PROCESS_DAY':
                 b_name = state['b_names'][state['b_idx']]
-                
                 lote_tamanho = 5 
                 obras_processadas_agora = 0
 
@@ -906,7 +1036,13 @@ def view_roteirizador():
         st.markdown("### 👥 1. Levantadores Principais")
         df_bases = pd.DataFrame()
 
-        base_file = st.file_uploader("Suba a planilha Levantadores_MA", type=["xlsx", "xls"])
+        # =============================================================
+        # DELIMITAÇÃO VISUAL POR CONTAINERS (ILHAS DE INFORMAÇÃO)
+        # =============================================================
+        with st.container():
+            st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+            base_file = st.file_uploader("Suba a planilha Levantadores_MA", type=["xlsx", "xls"])
+            st.markdown('</div>', unsafe_allow_html=True)
         
         if base_file:
             try:
@@ -945,10 +1081,17 @@ def view_roteirizador():
 
     with col_up_2:
         st.markdown("### 📁 2. Upload de Demandas (Obras)")
-        task_files = st.file_uploader("1️⃣ Base Principal (Planilha de Obras Antiga/Original)", type=["xlsx", "xls"], accept_multiple_files=True)
+        
+        with st.container():
+            st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+            task_files = st.file_uploader("1️⃣ Base Principal (Planilha de Obras Antiga/Original)", type=["xlsx", "xls"], accept_multiple_files=True)
+            st.markdown('</div>', unsafe_allow_html=True)
         
         st.markdown("##### 🔄 Atualização Rápida de Status (Opcional)")
-        status_file = st.file_uploader("2️⃣ Planilha Atualizada do SharePoint", type=["xlsx", "xls"])
+        with st.container():
+            st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+            status_file = st.file_uploader("2️⃣ Planilha Atualizada do SharePoint", type=["xlsx", "xls"])
+            st.markdown('</div>', unsafe_allow_html=True)
         
         df_status_upload = pd.DataFrame()
         coluna_status_selecionada = None
@@ -964,7 +1107,11 @@ def view_roteirizador():
         
         st.markdown("##### 🧑‍🤝‍🧑 3. Equipes de Apoio (Temporários - Opcional)")
         st.caption("Recebem APENAS obras comuns. O volume de trabalho é dividido nas mesmas regiões das equipes principais.")
-        temp_bases_files = st.file_uploader("Suba a(s) planilha(s) de Levantadores Temporários", type=["xlsx", "xls"], accept_multiple_files=True)
+        
+        with st.container():
+            st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+            temp_bases_files = st.file_uploader("Suba a(s) planilha(s) de Levantadores Temporários", type=["xlsx", "xls"], accept_multiple_files=True)
+            st.markdown('</div>', unsafe_allow_html=True)
         
         df_bases_temp = pd.DataFrame()
         if temp_bases_files:
@@ -1186,13 +1333,11 @@ def view_roteirizador():
                 df_tasks_alocadas = df_tasks_alocadas[df_tasks_alocadas['TIPO NOTA'].astype(str).isin(tipos_selecionados)]
 
             todas_cols = df_tasks_alocadas.columns.tolist()
-            
             cols_desejadas = ['PROTOCOLO', 'NOME', 'ENDEREÇO', 'MUNICIPIO', 'INFORMAÇÕES EXTRAS', 'LATITUDE', 'LONGITUDE', 'TIPO NOTA']
             cols_desejadas_norm = normalize_cols(cols_desejadas)
             cols_padrao = [c for c in cols_desejadas_norm if c in todas_cols]
             
             colunas_exibir = c_ex1.multiselect("Colunas para aparecer no Balão do KML", todas_cols, default=cols_padrao)
-            
             c_ex2.info(f"⚡ **Prioridade Automática Ativada:** Obras com TIPO NOTA igual a {', '.join(TIPOS_PRIORITARIOS)} recebem pino vermelho e são roteirizadas apenas para Equipes Principais.")
             col_prioridade = "TIPO NOTA"
 
@@ -1228,7 +1373,6 @@ def view_roteirizador():
             'b_idx': 0,
             'unvisited': df_tasks_alocadas.copy(),
             'routed_data': [],
-            
             'dia_final': [],
             'periodo_atual': 1,
             'ordem_absoluta': 1,
@@ -1236,7 +1380,6 @@ def view_roteirizador():
             'start_lat': None, 'start_lon': None,
             'tempo_acumulado_rota': 0.0,
             'almoco_inserido': False,
-            
             'obras_processadas': 0,
             'obras_sobra_total': 0,
             'total_obras': len(df_tasks_alocadas),
@@ -1247,6 +1390,5 @@ def view_roteirizador():
         st.session_state.vrp_status = "RUNNING"
         st.rerun()
 
-# Chamada direta para uso do app isolado
 if __name__ == "__main__":
     view_roteirizador()
