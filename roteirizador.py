@@ -132,6 +132,16 @@ def atualizar_status_via_df(df_principal, df_status, coluna_alvo):
 # ==========================================
 # 4. MOTOR VRP GOOGLE E MATEMÁTICA VETORIAL DE ALTA PERFORMANCE
 # ==========================================
+def haversine_vectorized(lat1, lon1, lat2, lon2):
+    """Calcula a distância em linha reta entre dois pontos na Terra em KM."""
+    R = 6371.0 
+    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = np.sin(dlat/2.0)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2.0)**2
+    c = 2 * np.arcsin(np.sqrt(a))
+    return R * c
+
 def calcular_matriz_distancias_numpy(coords):
     """
     Substitui loops for aninhados por Matemática Vetorial Pura (NumPy Broadcasting).
