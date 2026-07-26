@@ -345,6 +345,39 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
                     
     return buf_xl.getvalue()
 
+def gerar_excel_resumo_bytes(df):
+    """Gera o arquivo de resumo das equipes com a mesma formatação visual do Roteiro."""
+    buf_xl = io.BytesIO()
+    with pd.ExcelWriter(buf_xl, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Resumo')
+        ws = writer.sheets['Resumo']
+        
+        header_fill = PatternFill(start_color='0070C0', end_color='0070C0', fill_type='solid')
+        header_font = Font(color='FFFFFF', bold=True)
+        center_align = Alignment(horizontal='center', vertical='center')
+        left_align = Alignment(horizontal='left', vertical='center')
+        
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center_align
+            
+        for col_idx, col_name in enumerate(df.columns, 1):
+            col_letter = get_column_letter(col_idx)
+            nome_upper = str(col_name).upper()
+            
+            if nome_upper == 'LEVANTADOR':
+                ws.column_dimensions[col_letter].width = 45.0
+                col_align = left_align
+            else:
+                ws.column_dimensions[col_letter].width = 22.0
+                col_align = center_align
+                
+            for row_idx in range(2, len(df) + 2):
+                ws.cell(row=row_idx, column=col_idx).alignment = col_align
+                
+    return buf_xl.getvalue()
+
 def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_todas_bases=None, tipo_periodo="Dia"):
     """
     Gerador KML de Alta Performance.
@@ -625,10 +658,8 @@ def view_roteirizador():
                     'KM TOTAL PREVISTO': round(df_base['DISTANCIA_PONTO_ANTERIOR_KM'].sum(), 2)
                 })
 
-            buf_resumo_lev = io.BytesIO()
-            with pd.ExcelWriter(buf_resumo_lev, engine='openpyxl') as writer:
-                pd.DataFrame(resumo_levantadores).to_excel(writer, index=False, sheet_name='Resumo')
-            zip_xl.writestr(f"Resumo_Levantadores_{data_atual}.xlsx", buf_resumo_lev.getvalue())
+            df_resumo = pd.DataFrame(resumo_levantadores)
+            zip_xl.writestr(f"Resumo_Levantadores_{data_atual}.xlsx", gerar_excel_resumo_bytes(df_resumo))
             
             for base_nome in df_routed['BASE_ATRIBUIDA'].unique():
                 df_lev = df_routed[df_routed['BASE_ATRIBUIDA'] == base_nome].copy()
