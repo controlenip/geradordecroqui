@@ -13,7 +13,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import time
 from datetime import datetime
-from openpyxl.styles import Font
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 # ==========================================
 # CONSTANTES DE NEGÓCIO (Fácil Manutenção)
@@ -214,25 +215,69 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
     with pd.ExcelWriter(buf_xl, engine='openpyxl') as writer:
         df_export.to_excel(writer, index=False, sheet_name='Roteiro')
         ws = writer.sheets['Roteiro']
+        
+        # --- FORMATAÇÃO PADRÃO CORPORATIVA (Geral e Individual) ---
+        header_fill = PatternFill(start_color='0070C0', end_color='0070C0', fill_type='solid')
+        header_font = Font(color='FFFFFF', bold=True)
+        center_align = Alignment(horizontal='center', vertical='center')
+        left_align = Alignment(horizontal='left', vertical='center')
+        
+        # 1. Formatar Cabeçalho
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center_align
+            
+        col_types = {}
+        
+        # 2. Formatar Larguras das Colunas e Mapear Alinhamento
+        for col_idx, col_name in enumerate(df_export.columns, 1):
+            col_letter = get_column_letter(col_idx)
+            col_name_upper = str(col_name).upper()
+            
+            # Larguras inteligentes
+            if any(x in col_name_upper for x in ['NOME', 'CLIENTE', 'ENDEREÇO', 'ENDERECO', 'INFORMAÇ', 'INFORMAC', 'DESCRIC']):
+                ws.column_dimensions[col_letter].width = 45.0
+            elif any(x in col_name_upper for x in ['PROTOCOLO', 'MUNICIPIO', 'BASE', 'LOCALIDADE']):
+                ws.column_dimensions[col_letter].width = 25.0
+            else:
+                ws.column_dimensions[col_letter].width = 18.0
+                
+            # Alinhamento
+            if col_name_upper in ['ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE', 'LATITUDE', 'LONGITUDE']:
+                col_types[col_idx] = center_align
+            else:
+                col_types[col_idx] = left_align
+
+        # 3. Aplicar Fontes Especiais e Alinhamentos nas Linhas de Dados
         red_font = Font(color="FF0000", bold=True)
-        if 'PRIORIDADE' in df_export.columns:
-            prio_flag_idx = df_export.columns.get_loc('PRIORIDADE') + 1 
-            for row_idx in range(2, len(df_export) + 2):
-                if ws.cell(row=row_idx, column=prio_flag_idx).value == "Sim":
-                    ws.cell(row=row_idx, column=prio_flag_idx).font = red_font
-                    if col_prioridade != "Nenhuma" and col_prioridade in df_export.columns:
-                        try:
-                            ws.cell(row=row_idx, column=df_export.columns.get_loc(col_prioridade) + 1).font = red_font
-                        except: pass
+        prio_idx = df_export.columns.get_loc('PRIORIDADE') + 1 if 'PRIORIDADE' in df_export.columns else None
+        prio_target_idx = df_export.columns.get_loc(col_prioridade) + 1 if col_prioridade in df_export.columns else None
+
+        for row_idx in range(2, len(df_export) + 2):
+            for col_idx in range(1, len(df_export.columns) + 1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.alignment = col_types.get(col_idx, left_align)
+                
+            # Regra de Fonte Vermelha para Obras Prioritárias
+            if prio_idx and ws.cell(row=row_idx, column=prio_idx).value == "Sim":
+                ws.cell(row=row_idx, column=prio_idx).font = red_font
+                if prio_target_idx and col_prioridade != "Nenhuma":
+                    try:
+                        ws.cell(row=row_idx, column=prio_target_idx).font = red_font
+                    except: pass
+                    
     return buf_xl.getvalue()
 
-def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir):
+def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_todas_bases=None):
+    if lista_todas_bases is None:
+        lista_todas_bases = df_rota['BASE_ATRIBUIDA'].unique().tolist()
+        
     kml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
 <Document>
   <name>{doc_name}</name>
   <Style id="linha-rota-contorno"><LineStyle><color>ff000000</color><width>8</width></LineStyle></Style>
-  <Style id="linha-rota-centro"><LineStyle><color>ffffcc00</color><width>5</width></LineStyle></Style>
   <Style id="icon-blue">
     <IconStyle><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/blu-blank.png</href></Icon><hotSpot x="32" xunits="pixels" y="64" yunits="insetPixels"/></IconStyle>
     <LabelStyle><scale>0.9</scale></LabelStyle>
@@ -244,11 +289,34 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir):
   <Style id="icon-green"><IconStyle><scale>1.2</scale><Icon><href>https://maps.google.com/mapfiles/kml/shapes/homegardenbusiness.png</href></Icon></IconStyle></Style>
   <Style id="icon-yellow"><IconStyle><scale>1.3</scale><Icon><href>https://maps.google.com/mapfiles/kml/shapes/dining.png</href></Icon><LabelStyle><scale>1.0</scale></LabelStyle></IconStyle></Style>
 '''
+
+    # Paleta Dinâmica de Cores KML (AABBGGRR) para diferenciar cada Levantador
+    kml_cores = [
+        'ff4b19e6', # Vermelho
+        'ffd4bc00', # Cyan (Ciano)
+        'ffb5513f', # Indigo (Azul Escuro)
+        'ff889600', # Teal (Verde Água)
+        'ff0098ff', # Laranja
+        'ffb0279c', # Roxo
+        'ff39dccd', # Verde Limão
+        'ff631ee9', # Magenta
+        'ff3bebff', # Amarelo Ouro
+        'ff485579'  # Marrom
+    ]
+    
+    # Cria os estilos de linha coloridos para cada levantador que existe no painel
+    for idx, b_nome in enumerate(lista_todas_bases):
+        cor_kml = kml_cores[idx % len(kml_cores)]
+        nome_limpo = re.sub(r'[^A-Za-z0-9_]', '', str(b_nome))
+        kml += f'  <Style id="rota-centro-{nome_limpo}"><LineStyle><color>{cor_kml}</color><width>5</width></LineStyle></Style>\n'
+
     for base_nome in df_rota['BASE_ATRIBUIDA'].unique():
         df_base = df_rota[df_rota['BASE_ATRIBUIDA'] == base_nome]
         base_ref = next((b for b in bases_records if b['LEVANTADOR'] == base_nome), None)
         b_lat, b_lon = float(str(base_ref['LATITUDE']).replace(',','.')), float(str(base_ref['LONGITUDE']).replace(',','.'))
         res_nome = str(base_ref.get('RESIDENCIA', base_nome))
+        
+        nome_limpo_base = re.sub(r'[^A-Za-z0-9_]', '', str(base_nome))
 
         kml += f'  <Folder>\n    <name>Levantador: {html.escape(str(base_nome))}</name>\n'
         kml += f'    <Placemark><name>BASE: {html.escape(str(res_nome))}</name><styleUrl>#icon-green</styleUrl><Point><coordinates>{b_lon},{b_lat},0</coordinates></Point></Placemark>\n'
@@ -285,7 +353,8 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir):
                         coords_linha_kml += f"          {lon},{lat},0\n"
 
                 kml += f'        <Placemark><name>Contorno Rota</name><styleUrl>#linha-rota-contorno</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{coords_linha_kml}            </coordinates></LineString></Placemark>\n' 
-                kml += f'        <Placemark><name>Traçado Rota</name><styleUrl>#linha-rota-centro</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{coords_linha_kml}            </coordinates></LineString></Placemark>\n      </Folder>\n' 
+                # Aqui aplicamos a cor única do KML para o levantador
+                kml += f'        <Placemark><name>Traçado Rota</name><styleUrl>#rota-centro-{nome_limpo_base}</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{coords_linha_kml}            </coordinates></LineString></Placemark>\n      </Folder>\n' 
             kml += '    </Folder>\n' 
         kml += '  </Folder>\n' 
     kml += '</Document>\n</kml>'
@@ -377,15 +446,19 @@ def view_roteirizador():
 
         st.markdown("#### 🗺️ Visualização Geográfica do Plano")
         mapa = folium.Map(location=[df_routed['LATITUDE'].mean(), df_routed['LONGITUDE'].mean()], zoom_start=8) if not df_routed.empty else folium.Map(location=[-5.2, -45.0], zoom_start=7)
-        cores = ['#f1c40f', '#00b894', '#9b59b6', '#e67e22', '#e74c3c', '#1abc9c', '#27ae60', '#2980b9']
+        
+        # Paleta de Cores do Folium (Sincronizada exatamente com as cores do KML)
+        cores_folium = ['#e6194b', '#00bcd4', '#3f51b5', '#009688', '#ff9800', '#9c27b0', '#cddc39', '#e91e63', '#ffeb3b', '#795548']
+        lista_bases_mapa = df_routed['BASE_ATRIBUIDA'].unique().tolist()
         
         heat_data = [[r['LATITUDE'], r['LONGITUDE']] for _, r in df_real_tasks.iterrows()]
         HeatMap(heat_data, name="🔥 Mapa de Calor (Demandas)", radius=15, blur=10).add_to(mapa)
         
         marker_cluster = MarkerCluster(name="Obras (Agrupadas)").add_to(mapa)
         
-        for idx, base_nome in enumerate(df_routed['BASE_ATRIBUIDA'].unique()):
-            cor_rota = cores[idx % len(cores)]
+        for base_nome in lista_bases_mapa:
+            idx_cor = lista_bases_mapa.index(base_nome)
+            cor_rota = cores_folium[idx_cor % len(cores_folium)]
             df_base_rota = df_routed[df_routed['BASE_ATRIBUIDA'] == base_nome]
             base_ref = next((b for b in bases_records if b['LEVANTADOR'] == base_nome), None)
             b_lat, b_lon = float(str(base_ref['LATITUDE']).replace(',','.')), float(str(base_ref['LONGITUDE']).replace(',','.'))
@@ -445,9 +518,29 @@ def view_roteirizador():
                     'KM TOTAL PREVISTO': round(total_km, 2)
                 })
 
+            # Formatação do Excel de Resumo (Estilo Nativo)
             buf_resumo_lev = io.BytesIO()
             with pd.ExcelWriter(buf_resumo_lev, engine='openpyxl') as writer:
-                pd.DataFrame(resumo_levantadores).to_excel(writer, index=False, sheet_name='Resumo')
+                df_resumo = pd.DataFrame(resumo_levantadores)
+                df_resumo.to_excel(writer, index=False, sheet_name='Resumo')
+                ws_resumo = writer.sheets['Resumo']
+                
+                header_fill = PatternFill(start_color='0070C0', end_color='0070C0', fill_type='solid')
+                header_font = Font(color='FFFFFF', bold=True)
+                center_align = Alignment(horizontal='center', vertical='center')
+                
+                for cell in ws_resumo[1]:
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    
+                col_widths = {'A': 53.0, 'B': 16.0, 'C': 16.0, 'D': 21.0, 'E': 14.0, 'F': 20.0}
+                for col_letter, width in col_widths.items():
+                    ws_resumo.column_dimensions[col_letter].width = width
+                    
+                for row in ws_resumo.iter_rows(min_row=2, min_col=3, max_col=6):
+                    for cell in row:
+                        cell.alignment = center_align
+
             zip_xl.writestr(f"Resumo_Levantadores_{data_atual}.xlsx", buf_resumo_lev.getvalue())
             planilhas_geradas.append(f"Resumo_Levantadores_{data_atual}.xlsx")
             
@@ -462,14 +555,17 @@ def view_roteirizador():
 
         buf_zip_kml = io.BytesIO()
         with zipfile.ZipFile(buf_zip_kml, 'w', zipfile.ZIP_DEFLATED) as zip_kml:
-            zip_kml.writestr(f"Rota_Geral_{data_atual}.kml", gerar_kml_agrupado(df_routed, bases_records, f"Rota_Geral_{data_atual}", colunas_exibir).encode('utf-8'))
+            # Enviamos a lista mestra de bases para que as cores do KML sejam consistentes
+            lista_bases_geral = df_routed['BASE_ATRIBUIDA'].unique().tolist()
+            
+            zip_kml.writestr(f"Rota_Geral_{data_atual}.kml", gerar_kml_agrupado(df_routed, bases_records, f"Rota_Geral_{data_atual}", colunas_exibir, lista_bases_geral).encode('utf-8'))
             mapas_gerados = [f"Rota_Geral_{data_atual}.kml"]
             
             for base_nome in df_routed['BASE_ATRIBUIDA'].unique():
                 df_lev = df_routed[df_routed['BASE_ATRIBUIDA'] == base_nome].copy()
                 nome_seguro = re.sub(r'[^A-Za-z0-9_]', '', str(base_nome).replace(" ", "_"))
                 if not df_lev.empty:
-                    zip_kml.writestr(f"Rota_{nome_seguro}_{data_atual}.kml", gerar_kml_agrupado(df_lev, bases_records, f"Rota_{nome_seguro}", colunas_exibir).encode('utf-8'))
+                    zip_kml.writestr(f"Rota_{nome_seguro}_{data_atual}.kml", gerar_kml_agrupado(df_lev, bases_records, f"Rota_{nome_seguro}", colunas_exibir, lista_bases_geral).encode('utf-8'))
                     mapas_gerados.append(f"Rota_{nome_seguro}_{data_atual}.kml")
         zip_kml_bytes = buf_zip_kml.getvalue()
 
