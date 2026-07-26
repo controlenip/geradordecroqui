@@ -383,9 +383,12 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0070C0"
                         pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
                         
+                        dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
+                        
                         extra_rows = ""
                         for c in cols_exibir:
-                            if c in r: extra_rows += f"<tr><td style='padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;'>{html.escape(str(c))}:</td><td style='padding:4px 8px; color:#222; border-bottom:1px solid #eee;'>{html.escape(str(r[c]))}</td></tr>"
+                            if c in r and c.upper() != 'PROTOCOLO': 
+                                extra_rows += f"<tr><td style='padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;'>{html.escape(str(c))}:</td><td style='padding:4px 8px; color:#222; border-bottom:1px solid #eee;'>{html.escape(str(r[c]))}</td></tr>"
 
                         popup_html = f"""
                         <div style="font-family: Arial, sans-serif; width:300px; border-radius:6px; overflow:hidden; border:1px solid #ccc; background:#fff;">
@@ -397,6 +400,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                                     <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; width:40%;">Protocolo:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{html.escape(str(r.get('PROTOCOLO', 'N/A')))}</td></tr>
                                     <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Ordem:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
                                     <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Ant.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Próx.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{dist_prox} KM</td></tr>
                                     <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Tempo Est.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('TEMPO_VIAGEM_MINUTOS', 0)} Min</td></tr>
                                     {extra_rows}
                                 </table>
@@ -496,6 +500,9 @@ def view_roteirizador():
         st.markdown("## 🎯 Resultados da Roteirização Corporativa")
         st.info("Dê um **duplo clique** nas células abaixo para alterar o responsável ou a ordem das obras.")
         
+        # Re-garante a atualização da coluna DISTANCIA_PROXIMO_PONTO_KM caso o usuário edite a ordem manualmente
+        st.session_state.df_routed['DISTANCIA_PROXIMO_PONTO_KM'] = st.session_state.df_routed.groupby(['BASE_ATRIBUIDA', 'PERIODO'])['DISTANCIA_PONTO_ANTERIOR_KM'].shift(-1).fillna(0.0)
+
         df_editado_ui = st.data_editor(
             st.session_state.df_routed, use_container_width=True,
             column_config={ 
@@ -536,6 +543,7 @@ def view_roteirizador():
             st.bar_chart(df_routed.groupby('BASE_ATRIBUIDA')['DISTANCIA_PONTO_ANTERIOR_KM'].sum(), color="#FF4B4B")
         st.markdown("---")
         
+        # === MAPA FOLIUM COM DISTÂNCIA ANTERIOR E DISTÂNCIA PRÓXIMO ===
         st.markdown("#### 🗺️ Visualização Geográfica do Plano")
         mapa = folium.Map(location=[df_routed['LATITUDE'].mean(), df_routed['LONGITUDE'].mean()], zoom_start=8) if not df_routed.empty else folium.Map(location=[-5.2, -45.0], zoom_start=7)
         
@@ -576,21 +584,25 @@ def view_roteirizador():
                     pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0070C0"
                     pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
                     
+                    dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
+                    
                     extra_rows = ""
                     for c in colunas_exibir:
-                        if c in r: extra_rows += f"<tr><td style='padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;'>{html.escape(str(c))}:</td><td style='padding:4px 8px; color:#222; border-bottom:1px solid #eee;'>{html.escape(str(r[c]))}</td></tr>"
+                        if c in r and c.upper() != 'PROTOCOLO': 
+                            extra_rows += f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>{c}:</td><td style='padding:3px 6px; color:#333;'>{r[c]}</td></tr>"
 
                     popup_html = f"""
-                    <div style="font-family: Arial, sans-serif; width:300px; border-radius:6px; overflow:hidden; border:1px solid #ccc; background:#fff;">
-                        <div style="background:{pop_header_bg}; color:white; padding:10px; font-size:14px; font-weight:bold; text-align:center;">
+                    <div style="font-family:sans-serif; width:260px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
+                        <div style="background:{pop_header_bg}; color:white; padding:8px 10px; font-size:13px; font-weight:bold;">
                             {pop_prio_txt}
                         </div>
-                        <div style="padding:10px; background:#fafafa; font-size:13px;">
-                            <table style="width:100%; border-collapse:collapse; text-align:left;">
-                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; width:40%;">Protocolo:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{html.escape(str(r.get('PROTOCOLO', 'N/A')))}</td></tr>
-                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Ordem:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
-                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Ant.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
-                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Tempo Est.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('TEMPO_VIAGEM_MINUTOS', 0)} Min</td></tr>
+                        <div style="padding:10px; background:#fafafa; font-size:12px;">
+                            <table style="width:100%; border-collapse:collapse;">
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Protocolo:</td><td style="padding:3px 6px; color:#333;">{r.get('PROTOCOLO', 'N/A')}</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Tempo Est.:</td><td style="padding:3px 6px; color:#333;">{r.get('TEMPO_VIAGEM_MINUTOS', 0)} Min</td></tr>
                                 {extra_rows}
                             </table>
                         </div>
