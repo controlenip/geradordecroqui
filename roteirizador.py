@@ -18,7 +18,7 @@ from openpyxl.styles import Font
 # ==========================================
 # CONSTANTES DE NEGÓCIO (Fácil Manutenção)
 # ==========================================
-STATUS_VALIDOS = [
+STATUS_PADRAO = [
     'EM LEVANTAMENTO', '0', 'SEM INFORMAÇÕES', 'SEM INFORMACOES', 
     'CORREÇÃO DE LEVANTAMENTO', 'CORRECAO DE LEVANTAMENTO', 'PRÉ ANÁLISE', 'PRE ANALISE'
 ]
@@ -178,7 +178,6 @@ def obter_rota_ruas(lat1, lon1, lat2, lon2, vel_fallback_kmh=30):
         if r.status_code == 200 and r.json().get('code') == 'Ok':
             return r.json()['routes'][0]['geometry']['coordinates'], r.json()['routes'][0]['duration']
     except Exception: pass
-    # Fallback (Plano B) caso a API caia após todas as tentativas: Linha Reta
     dist_km = haversine_vectorized(lat1, lon1, lat2, lon2)
     return [[lon1, lat1], [lon2, lat2]], (dist_km / vel_fallback_kmh) * 3600
 
@@ -453,7 +452,7 @@ def view_roteirizador():
         if col_b3.button("🧹 Zerar Roteirizador", type="primary", use_container_width=True):
             limpar_roteirizador()
             
-        return # Impede que o resto da tela apareça
+        return 
 
     # -------------------------------------------------------------
     # 2. MÁQUINA DE ESTADOS - ROTEAMENTO CONTÍNUO E BATCH
@@ -501,7 +500,6 @@ def view_roteirizador():
             status_text = st.empty()
             df_todas_bases_ativas = pd.DataFrame(st.session_state.bases_records)
             
-            # --- FASE 1: INÍCIO DO LEVANTADOR ---
             if state['fase'] == 'INIT':
                 if state['b_idx'] >= len(state['b_names']):
                     state['fase'] = 'DONE'
@@ -520,7 +518,6 @@ def view_roteirizador():
                         state['fase'] = 'BUILD_DAY'
                 st.rerun()
                 
-            # --- FASE 2: CLUSTERIZAÇÃO DO DIA E IA TSP ---
             elif state['fase'] == 'BUILD_DAY':
                 b_name = state['b_names'][state['b_idx']]
                 status_text.info(f"🧠 Organizando {cfg['tipo_periodo']} {state['periodo_atual']} para **{b_name}**...")
@@ -600,11 +597,10 @@ def view_roteirizador():
                 state['fase'] = 'PROCESS_DAY'
                 st.rerun()
 
-            # --- FASE 3: MAPEAMENTO OSRM EM LOTE (Acelerado) ---
             elif state['fase'] == 'PROCESS_DAY':
                 b_name = state['b_names'][state['b_idx']]
                 
-                lote_tamanho = 5 # Processa 5 obras por ciclo da interface para maior fluidez
+                lote_tamanho = 5 
                 obras_processadas_agora = 0
 
                 while len(state['dia_final']) > 0 and obras_processadas_agora < lote_tamanho:
@@ -647,14 +643,13 @@ def view_roteirizador():
                     state['obras_processadas'] += 1
                     
                     obras_processadas_agora += 1
-                    time.sleep(0.02) # Respiro super leve da API
+                    time.sleep(0.02)
                 
                 if len(state['dia_final']) == 0:
                     state['fase'] = 'END_DAY'
                     
-                st.rerun() # Só recarrega a tela DEPOIS de processar o Lote inteiro (Performance brutal)
+                st.rerun()
 
-            # --- FASE 4: FIM DO DIA (RETORNO À BASE) ---
             elif state['fase'] == 'END_DAY':
                 b_name = state['b_names'][state['b_idx']]
                 status_text.success(f"🏠 Fechando {cfg['tipo_periodo']} {state['periodo_atual']} de **{b_name}**, traçando retorno...")
@@ -675,13 +670,11 @@ def view_roteirizador():
                 state['fase'] = 'BUILD_DAY'
                 st.rerun()
 
-            # --- FASE 5: PRÓXIMA EQUIPE ---
             elif state['fase'] == 'END_TEAM':
                 state['b_idx'] += 1
                 state['fase'] = 'INIT'
                 st.rerun()
                 
-            # --- FASE 6: FINALIZAÇÃO TOTAL ---
             elif state['fase'] == 'DONE':
                 status_text.success("✅ Roteirização finalizada! Preparando arquivos finais...")
                 
@@ -853,7 +846,30 @@ def view_roteirizador():
 
     st.markdown("---")
     
-    # === LIMPEZA E MARCAÇÃO DE PRIORIDADES ===
+    # === SELEÇÃO INTERATIVA DE STATUS (NOVO FILTRO) ===
+    if 'STATUS LIST' in df_tasks.columns:
+        # Pega todos os status únicos presentes na planilha enviada
+        df_tasks['STATUS_LIMPO'] = df_tasks['STATUS LIST'].astype(str).str.strip().str.upper()
+        status_unicos = sorted(df_tasks['STATUS_LIMPO'].unique().tolist())
+        
+        # Mantém como padrão apenas os que realmente existem no arquivo para evitar erros
+        padroes_ativos = [s for s in status_unicos if s in STATUS_PADRAO]
+        
+        status_selecionados = st.multiselect(
+            "📌 Selecione os Status que devem ser incluídos na Roteirização:",
+            options=status_unicos,
+            default=padroes_ativos
+        )
+        
+        if not status_selecionados:
+            st.warning("⚠️ Você precisa selecionar pelo menos um status para prosseguir.")
+            return
+            
+        # Filtra a planilha mantendo APENAS o que o usuário deixou selecionado no campo
+        df_tasks = df_tasks[df_tasks['STATUS_LIMPO'].isin(status_selecionados)]
+        df_tasks = df_tasks.drop(columns=['STATUS_LIMPO']) # Limpa a coluna temporária
+
+    # === LIMPEZA DE BASE (LAT/LON E OUTROS CAMPOS) ===
     total_orig = len(df_tasks)
     df_tasks['LATITUDE'] = pd.to_numeric(df_tasks['LATITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
     df_tasks['LONGITUDE'] = pd.to_numeric(df_tasks['LONGITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
@@ -868,16 +884,13 @@ def view_roteirizador():
     if 'STATUS SAP' in df_tasks.columns:
         df_tasks = df_tasks[~df_tasks['STATUS SAP'].astype(str).str.strip().str.upper().isin(['CANC', 'FINL'])]
 
-    if 'STATUS LIST' in df_tasks.columns:
-        df_tasks = df_tasks[df_tasks['STATUS LIST'].astype(str).str.strip().str.upper().isin(STATUS_VALIDOS)]
-
     if 'TIPO NOTA' in df_tasks.columns:
         df_tasks['PRIORIDADE'] = df_tasks['TIPO NOTA'].apply(lambda x: 'Sim' if str(x).strip().upper() in TIPOS_PRIORITARIOS else 'Não')
     else:
         df_tasks['PRIORIDADE'] = 'Não'
 
     if total_orig - len(df_tasks) > 0:
-        st.warning(f"⚠️ {total_orig - len(df_tasks)} obras com erros sistêmicos ou de Status (incluindo campos de Nome vazios) foram ignoradas. Restam **{len(df_tasks)} válidas.**")
+        st.warning(f"⚠️ {total_orig - len(df_tasks)} obras com erros sistêmicos (sem coordenadas ou campos de Nome vazios) foram ignoradas. Restam **{len(df_tasks)} válidas.**")
 
     if df_tasks.empty: return
 
