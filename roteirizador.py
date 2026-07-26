@@ -839,7 +839,7 @@ def view_roteirizador():
                         lunch_start = current_time
                         lunch_end = current_time + pd.Timedelta(hours=1)
                         state['routed_data'].append({
-                            'PROTOCOLO': 'PAUSA_ALMOCO', 'NOME DO SOLICITANTE': '🍔 ALMOÇO DA EQUIPE', 
+                            'PROTOCOLO': 'PAUSA_ALMOCO', 'NOME': '🍔 ALMOÇO DA EQUIPE', 
                             'LATITUDE': item['lat_ant'], 'LONGITUDE': item['lon_ant'],
                             'BASE_ATRIBUIDA': b_name, 'ORDEM': ordem_global, 
                             'SEMANA': item['periodo'] if cfg['tipo_periodo'] == "Semana" else 1,
@@ -860,7 +860,7 @@ def view_roteirizador():
                     if item['is_retorno']:
                         dist_km = haversine_vectorized(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'])
                         state['routed_data'].append({
-                            'PROTOCOLO': 'RETORNO_BASE', 'NOME DO SOLICITANTE': 'BASE_RETORNO', 
+                            'PROTOCOLO': 'RETORNO_BASE', 'NOME': 'BASE_RETORNO', 
                             'LATITUDE': item['lat_atual'], 'LONGITUDE': item['lon_atual'],
                             'BASE_ATRIBUIDA': b_name, 'ORDEM': ordem_global, 
                             'SEMANA': item['periodo'] if cfg['tipo_periodo'] == "Semana" else 1,
@@ -1073,7 +1073,6 @@ def view_roteirizador():
     if len(todas_bases_records) > 0:
         df_tasks['BASE_ATRIBUIDA'] = "NÃO ALOCADO"
         
-        # MUDANÇA: Isolamento de Prioridades (Blindagem para Temporários)
         df_tasks['COORD_KEY'] = df_tasks['LATITUDE'].astype(str) + "_" + df_tasks['LONGITUDE'].astype(str)
         coords_com_prio = df_tasks[df_tasks['PRIORIDADE'] == 'Sim']['COORD_KEY'].unique()
         
