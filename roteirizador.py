@@ -134,7 +134,7 @@ def atualizar_status_via_df(df_principal, df_status, coluna_alvo):
     return df_principal
 
 # ==========================================
-# 4. MOTOR VRP GOOGLE E MATEMÁTICA VETORIAL DE ALTA PERFORMANCE
+# 4. MOTOR VRP GOOGLE E MATEMÁTICA VETORIAL
 # ==========================================
 def haversine_vectorized(lat1, lon1, lat2, lon2):
     R = 6371.0 
@@ -156,90 +156,55 @@ def calcular_matriz_distancias_numpy(coords):
     return (R * c).astype(int)
 
 def obter_matriz_osrm(coords, url_osrm_base):
-    if len(coords) > 100 and 'project-osrm' in url_osrm_base:
-        return None
-        
+    if len(coords) > 100 and 'project-osrm' in url_osrm_base: return None
     coords_str = ";".join([f"{lon:.6f},{lat:.6f}" for lat, lon in coords])
     url = f"{url_osrm_base}/table/v1/driving/{coords_str}?annotations=distance"
     try:
         r = http_session.get(url, timeout=5)
         if r.status_code == 200:
             data = r.json()
-            if data.get('code') == 'Ok':
-                return np.array(data['distances']).astype(int).tolist()
-    except Exception:
-        pass
+            if data.get('code') == 'Ok': return np.array(data['distances']).astype(int).tolist()
+    except: pass
     return None
 
-def roteirizar_equipe_ortools(lista_obras, base_lat, base_lon, cfg, url_osrm_base):
+def resolver_tsp_ortools(lista_obras, base_lat, base_lon, url_osrm_base):
+    """MUDANÇA 1: Roteiriza uma sequência inquebrável (Prioridades 1º, Comuns Depois)"""
     if not lista_obras: return []
-    
     coords_array = np.array([(base_lat, base_lon)] + [(r['LATITUDE'], r['LONGITUDE']) for r in lista_obras])
     
     distance_matrix = obter_matriz_osrm(coords_array, url_osrm_base)
     if distance_matrix is None:
         distance_matrix = calcular_matriz_distancias_numpy(coords_array).tolist()
         
-    num_veiculos = int(cfg['limite_periodos'])
-    demands = [0]
-    
-    if cfg['modo_limite'] == "Quantidade Fixa de Obras":
-        for r in lista_obras: demands.append(1) 
-        capacities = [int(cfg['obras_por_periodo'])] * num_veiculos
-    else:
-        for r in lista_obras:
-            is_rur = True if ('LOCALIDADE' in r and str(r['LOCALIDADE']).upper() == 'RURAL') or ('TIPO NOTA' in r and str(r['TIPO NOTA']).upper() == 'UNR') else False
-            dist_reta_km = distance_matrix[0][len(demands)] / 1000.0 
-            tempo_viagem = (dist_reta_km / cfg['velocidade_media_kmh']) * (1.6 if is_rur else 1.0) * 60
-            peso_minutos = int(tempo_viagem + (cfg['tempo_medio_obra'] * 60))
-            demands.append(peso_minutos)
-        max_minutos_dia = int(cfg['horas_por_dia'] * 60)
-        capacities = [max_minutos_dia] * num_veiculos
-
-    manager = pywrapcp.RoutingIndexManager(len(distance_matrix), num_veiculos, 0)
+    manager = pywrapcp.RoutingIndexManager(len(distance_matrix), 1, 0)
     routing = pywrapcp.RoutingModel(manager)
 
     def distance_callback(from_index, to_index):
-        from_node = manager.IndexToNode(from_index)
-        to_node = manager.IndexToNode(to_index)
-        return distance_matrix[from_node][to_node]
+        return distance_matrix[manager.IndexToNode(from_index)][manager.IndexToNode(to_index)]
 
     transit_callback_index = routing.RegisterTransitCallback(distance_callback)
     routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-
-    def demand_callback(from_index):
-        from_node = manager.IndexToNode(from_index)
-        return demands[from_node]
-
-    demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
-    routing.AddDimensionWithVehicleCapacity(demand_callback_index, 0, capacities, True, 'Capacity')
-
-    for idx, r in enumerate(lista_obras):
-        node_index = manager.NodeToIndex(idx + 1)
-        penalty = 50000000 if r.get('PRIORIDADE') == 'Sim' else 10000000
-        routing.AddDisjunction([node_index], penalty)
+    
+    penalty = 100000000 
+    for node in range(1, len(distance_matrix)):
+        routing.AddDisjunction([manager.NodeToIndex(node)], penalty)
 
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     search_parameters.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-    search_parameters.time_limit.seconds = 3 
+    search_parameters.time_limit.seconds = 2 
     
     solution = routing.SolveWithParameters(search_parameters)
     
-    rotas_por_periodo = []
+    rota_atual = []
     if solution:
-        for vehicle_id in range(num_veiculos):
-            index = routing.Start(vehicle_id)
-            rota_atual = []
-            while not routing.IsEnd(index):
-                node_index = manager.IndexToNode(index)
-                if node_index != 0:
-                    rota_atual.append(lista_obras[node_index - 1])
-                index = solution.Value(routing.NextVar(index))
-            if len(rota_atual) > 0:
-                rotas_por_periodo.append(rota_atual)
-    
-    return rotas_por_periodo
+        index = routing.Start(0)
+        while not routing.IsEnd(index):
+            node_index = manager.IndexToNode(index)
+            if node_index != 0:
+                rota_atual.append(lista_obras[node_index - 1])
+            index = solution.Value(routing.NextVar(index))
+    return rota_atual
 
 def kmeans_clustering(coords, k, max_iters=100):
     np.random.seed(42)
@@ -281,7 +246,7 @@ def obter_rota_ruas(lat1, lon1, lat2, lon2, url_osrm_base, vel_fallback_kmh=30):
     return [[lon1, lat1], [lon2, lat2]], (dist_m / 1000.0 / vel_fallback_kmh) * 3600
 
 # ==========================================
-# 5. MÓDULO DE EXPORTAÇÃO (EXCEL / KML ULTRA RÁPIDO)
+# 5. MÓDULO DE EXPORTAÇÃO (EXCEL / KML)
 # ==========================================
 def identificar_icone_folium(row, colunas):
     tipo_str = str(row.get('TIPO LIGACAO', '')) + str(row.get('SERVICO', '')) + str(row.get('TIPO NOTA', ''))
@@ -295,11 +260,8 @@ def identificar_icone_folium(row, colunas):
 
 def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
     df_export = df.copy()
-    if 'PROTOCOLO' in df_export.columns:
-        df_export = df_export[~df_export['PROTOCOLO'].isin(['RETORNO_BASE', 'PAUSA_ALMOCO'])]
-    if 'ROTA_GEOMETRIA' in df_export.columns: 
-        df_export = df_export.drop(columns=['ROTA_GEOMETRIA'])
-    for col in ['STATUS LIST', 'INICIO AVARIA', 'STATUS ATUAL (LEVANTAMENTO)', 'DESCRICAO']:
+    if 'PROTOCOLO' in df_export.columns: df_export = df_export[~df_export['PROTOCOLO'].isin(['RETORNO_BASE', 'PAUSA_ALMOCO'])]
+    for col in ['ROTA_GEOMETRIA', 'STATUS LIST', 'INICIO AVARIA', 'STATUS ATUAL (LEVANTAMENTO)', 'DESCRICAO', '_HORA_INICIO_DT', '_HORA_FIM_DT']:
         if col in df_export.columns: df_export = df_export.drop(columns=[col])
 
     if colunas_originais:
@@ -327,12 +289,9 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
         for col_idx, col_name in enumerate(df_export.columns, 1):
             col_letter = get_column_letter(col_idx)
             col_name_upper = str(col_name).upper()
-            if any(x in col_name_upper for x in ['NOME', 'CLIENTE', 'ENDEREÇO', 'INFORMAÇ', 'HORA']):
-                ws.column_dimensions[col_letter].width = 45.0
-            elif any(x in col_name_upper for x in ['PROTOCOLO', 'MUNICIPIO', 'BASE', 'LOCALIDADE']):
-                ws.column_dimensions[col_letter].width = 25.0
-            else:
-                ws.column_dimensions[col_letter].width = 18.0
+            if any(x in col_name_upper for x in ['NOME', 'CLIENTE', 'ENDEREÇO', 'INFORMAÇ']): ws.column_dimensions[col_letter].width = 45.0
+            elif any(x in col_name_upper for x in ['PROTOCOLO', 'MUNICIPIO', 'BASE', 'LOCALIDADE']): ws.column_dimensions[col_letter].width = 25.0
+            else: ws.column_dimensions[col_letter].width = 18.0
                 
             if col_name_upper in ['ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE', 'HORA_INICIO', 'HORA_FIM']:
                 col_types[col_idx] = center_align
@@ -373,23 +332,17 @@ def gerar_excel_resumo_bytes(df):
             
         for col_idx, col_name in enumerate(df.columns, 1):
             col_letter = get_column_letter(col_idx)
-            nome_upper = str(col_name).upper()
-            
-            if nome_upper == 'LEVANTADOR':
+            if str(col_name).upper() == 'LEVANTADOR':
                 ws.column_dimensions[col_letter].width = 45.0
                 col_align = left_align
             else:
                 ws.column_dimensions[col_letter].width = 22.0
                 col_align = center_align
-                
-            for row_idx in range(2, len(df) + 2):
-                ws.cell(row=row_idx, column=col_idx).alignment = col_align
-                
+            for row_idx in range(2, len(df) + 2): ws.cell(row=row_idx, column=col_idx).alignment = col_align
     return buf_xl.getvalue()
 
 def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_todas_bases=None, tipo_periodo="Dia"):
-    if lista_todas_bases is None:
-        lista_todas_bases = df_rota['BASE_ATRIBUIDA'].unique().tolist()
+    if lista_todas_bases is None: lista_todas_bases = df_rota['BASE_ATRIBUIDA'].unique().tolist()
         
     kml_lines = [f'''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -437,7 +390,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     else:
                         pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0070C0"
                         pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
-                        
                         dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
                         
                         extra_rows = "".join([f"<tr><td style='padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;'>{html.escape(str(c))}:</td><td style='padding:4px 8px; color:#222; border-bottom:1px solid #eee;'>{html.escape(str(r.get(c, '')))}</td></tr>" for c in cols_exibir if c.upper() != 'PROTOCOLO'])
@@ -449,14 +401,13 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                                 <table style="width:100%; border-collapse:collapse; text-align:left;">
                                     <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; width:40%;">Protocolo:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{html.escape(str(r.get('PROTOCOLO', 'N/A')))}</td></tr>
                                     <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Ordem:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
-                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Horário:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('HORA_INICIO', '')} - {r.get('HORA_FIM', '')}</td></tr>
+                                    <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Horário:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
                                     <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Ant.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
                                     <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Próx.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{dist_prox} KM</td></tr>
                                     {extra_rows}
                                 </table>
                             </div>
                         </div>"""
-                        
                         tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
                         nome_ponto = f"{tag_prio}[{r.get('ORDEM', 0)}] Prot: {html.escape(str(r.get('PROTOCOLO', 'N/A')))}"
                         style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
@@ -474,7 +425,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
             kml_lines.append('    </Folder>')
         kml_lines.append('  </Folder>')
     kml_lines.append('</Document>\n</kml>')
-    
     return "\n".join(kml_lines)
 
 
@@ -522,13 +472,14 @@ def view_roteirizador():
         
         limite_km_diario = st.slider(f"Limite de KM por {tipo_periodo}", 0, 500, 500, 5, disabled=is_locked)
         
-        obras_por_periodo = 10
+        # MUDANÇA 3: Padrão alterado de 10 para 4 obras conforme o limite diário da Progeo
+        obras_por_periodo = 4
         horas_por_dia = 8.0
         tempo_medio_obra = 1.5
         velocidade_media_kmh = 30.0
         
         if modo_limite == "Quantidade Fixa de Obras":
-            obras_por_periodo = st.number_input(f"Obras por {tipo_periodo}", min_value=1, value=10, step=1, disabled=is_locked)
+            obras_por_periodo = st.number_input(f"Obras por {tipo_periodo}", min_value=1, value=4, step=1, disabled=is_locked)
             limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
         else:
             horas_por_dia = st.number_input(f"Horas por {tipo_periodo}", min_value=1.0, value=8.0, step=0.5, disabled=is_locked)
@@ -554,7 +505,8 @@ def view_roteirizador():
         df_editado_ui = st.data_editor(
             st.session_state.df_routed, use_container_width=True,
             column_config={ 
-                "ROTA_GEOMETRIA": None, "LATITUDE": st.column_config.NumberColumn(disabled=True), "LONGITUDE": st.column_config.NumberColumn(disabled=True),
+                "ROTA_GEOMETRIA": None, "_HORA_INICIO_DT": None, "_HORA_FIM_DT": None,
+                "LATITUDE": st.column_config.NumberColumn(disabled=True), "LONGITUDE": st.column_config.NumberColumn(disabled=True),
                 "DISTANCIA_PONTO_ANTERIOR_KM": st.column_config.NumberColumn(disabled=True), "DISTANCIA_PROXIMO_PONTO_KM": st.column_config.NumberColumn(disabled=True), "TEMPO_VIAGEM_MINUTOS": st.column_config.NumberColumn(disabled=True)
             }
         )
@@ -588,11 +540,13 @@ def view_roteirizador():
             return f"{prio}Obra Operacional"
             
         df_gantt['TAREFA'] = df_gantt.apply(label_tarefa, axis=1)
-        df_gantt['HORA_INICIO'] = pd.to_datetime(df_gantt['HORA_INICIO'])
-        df_gantt['HORA_FIM'] = pd.to_datetime(df_gantt['HORA_FIM'])
+        
+        # MUDANÇA 4: Plotly Gantt usa os datetimes internos para alinhar as colunas sem poluir a visão
+        df_gantt['START_PLOT'] = pd.to_datetime(df_gantt['_HORA_INICIO_DT'])
+        df_gantt['END_PLOT'] = pd.to_datetime(df_gantt['_HORA_FIM_DT'])
         
         mask_retorno = df_gantt['PROTOCOLO'] == 'RETORNO_BASE'
-        df_gantt.loc[mask_retorno, 'HORA_FIM'] = df_gantt.loc[mask_retorno, 'HORA_FIM'] + pd.Timedelta(minutes=5)
+        df_gantt.loc[mask_retorno, 'END_PLOT'] = df_gantt.loc[mask_retorno, 'END_PLOT'] + pd.Timedelta(minutes=5)
         
         periodos_disp = sorted(df_gantt['PERIODO'].unique())
         if periodos_disp:
@@ -601,7 +555,7 @@ def view_roteirizador():
             
             fig = px.timeline(
                 df_plot, 
-                x_start="HORA_INICIO", x_end="HORA_FIM", y="BASE_ATRIBUIDA", color="TAREFA",
+                x_start="START_PLOT", x_end="END_PLOT", y="BASE_ATRIBUIDA", color="TAREFA",
                 hover_name="PROTOCOLO",
                 color_discrete_map={'Deslocamento/Retorno': '#6c757d', 'Pausa para Almoço': '#f39c12', 'Obra Operacional': '#3498db', '🚨 Obra Operacional': '#e74c3c'},
                 height=300 + (len(df_plot['BASE_ATRIBUIDA'].unique()) * 30)
@@ -798,101 +752,160 @@ def view_roteirizador():
             obras_equipe = unvisited[unvisited['BASE_ATRIBUIDA'] == b_name].to_dict('records')
             
             if obras_equipe:
-                rotas_resolvidas = roteirizar_equipe_ortools(obras_equipe, base_lat, base_lon, cfg, url_osrm_base)
+                # MUDANÇA 1: Roteia Prioridades Primeiro, e Comuns Depois
+                prio_obras = [o for o in obras_equipe if o.get('PRIORIDADE') == 'Sim']
+                comum_obras = [o for o in obras_equipe if o.get('PRIORIDADE') != 'Sim']
                 
+                ordered_tasks = []
+                if prio_obras:
+                    ordered_tasks.extend(resolver_tsp_ortools(prio_obras, base_lat, base_lon, url_osrm_base))
+                if comum_obras:
+                    ordered_tasks.extend(resolver_tsp_ortools(comum_obras, base_lat, base_lon, url_osrm_base))
+                
+                # MUDANÇA 2 e 3: FATIAMENTO HORÁRIO DE 08H AS 18H COM ALMOÇO
                 rotas_flat = []
-                for idx_periodo, rota_dia in enumerate(rotas_resolvidas):
-                    periodo = idx_periodo + 1
-                    lat_atual, lon_atual = base_lat, base_lon
+                ordem_global = 1
+                periodo = 1
+                
+                def iniciar_dia():
+                    return {
+                        'lat': base_lat, 'lon': base_lon,
+                        'time': pd.to_datetime('2026-01-01 08:00:00'),
+                        'obras': 0, 'lunch': False
+                    }
                     
-                    for obra in rota_dia:
+                estado = iniciar_dia()
+                
+                for obra in ordered_tasks:
+                    viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
+                    viagem_min = (viagem_km / cfg['velocidade_media_kmh']) * 60
+                    exec_min = cfg['tempo_medio_obra'] * 60
+                    
+                    chegada_prevista = estado['time'] + pd.Timedelta(minutes=viagem_min)
+                    
+                    if chegada_prevista.hour >= 12 and not estado['lunch']:
+                        lunch_start = max(estado['time'], pd.to_datetime('2026-01-01 12:00:00'))
+                        lunch_end = lunch_start + pd.Timedelta(hours=1)
+                        
                         rotas_flat.append({
-                            'obra': obra, 'lat_ant': lat_atual, 'lon_ant': lon_atual,
-                            'lat_atual': obra['LATITUDE'], 'lon_atual': obra['LONGITUDE'],
-                            'periodo': periodo, 'is_retorno': False
+                            'obra': None, 'is_lunch': True, 'is_retorno': False,
+                            'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
+                            'lat_atual': estado['lat'], 'lon_atual': estado['lon'],
+                            'periodo': periodo, 'ordem': ordem_global,
+                            'hora_inicio': lunch_start, 'hora_fim': lunch_end,
+                            'viagem_min': 0.0, 'dist_km': 0.0
                         })
-                        lat_atual, lon_atual = obra['LATITUDE'], obra['LONGITUDE']
+                        estado['time'] = lunch_end
+                        estado['lunch'] = True
+                        ordem_global += 1
+                        chegada_prevista = estado['time'] + pd.Timedelta(minutes=viagem_min)
+                        
+                    fim_previsto = chegada_prevista + pd.Timedelta(minutes=exec_min)
+                    
+                    limite_atingido = False
+                    if cfg['modo_limite'] == "Quantidade Fixa de Obras" and estado['obras'] >= cfg['obras_por_periodo']:
+                        limite_atingido = True
+                    # Trava relógio 18:00 (joga pro proximo dia se exceder)
+                    if fim_previsto.hour >= 18 or fim_previsto.day > 1:
+                        limite_atingido = True
+                        
+                    if limite_atingido:
+                        dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
+                        viagem_ret = (dist_ret / cfg['velocidade_media_kmh']) * 60
+                        ret_fim = estado['time'] + pd.Timedelta(minutes=viagem_ret)
+                        
+                        rotas_flat.append({
+                            'obra': None, 'is_lunch': False, 'is_retorno': True,
+                            'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
+                            'lat_atual': base_lat, 'lon_atual': base_lon,
+                            'periodo': periodo, 'ordem': ordem_global,
+                            'hora_inicio': estado['time'], 'hora_fim': ret_fim,
+                            'viagem_min': viagem_ret, 'dist_km': dist_ret
+                        })
+                        periodo += 1
+                        ordem_global += 1
+                        estado = iniciar_dia()
+                        
+                        viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
+                        viagem_min = (viagem_km / cfg['velocidade_media_kmh']) * 60
+                        chegada_prevista = estado['time'] + pd.Timedelta(minutes=viagem_min)
+                        fim_previsto = chegada_prevista + pd.Timedelta(minutes=exec_min)
                         
                     rotas_flat.append({
-                        'obra': None, 'lat_ant': lat_atual, 'lon_ant': lon_atual,
-                        'lat_atual': base_lat, 'lon_atual': base_lon,
-                        'periodo': periodo, 'is_retorno': True
+                        'obra': obra, 'is_lunch': False, 'is_retorno': False,
+                        'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
+                        'lat_atual': obra['LATITUDE'], 'lon_atual': obra['LONGITUDE'],
+                        'periodo': periodo, 'ordem': ordem_global,
+                        'hora_inicio': chegada_prevista, 'hora_fim': fim_previsto,
+                        'viagem_min': viagem_min, 'dist_km': viagem_km
                     })
+                    estado['lat'] = obra['LATITUDE']
+                    estado['lon'] = obra['LONGITUDE']
+                    estado['time'] = fim_previsto
+                    estado['obras'] += 1
+                    ordem_global += 1
+
+                dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
+                viagem_ret = (dist_ret / cfg['velocidade_media_kmh']) * 60
+                ret_fim = estado['time'] + pd.Timedelta(minutes=viagem_ret)
+                rotas_flat.append({
+                    'obra': None, 'is_lunch': False, 'is_retorno': True,
+                    'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
+                    'lat_atual': base_lat, 'lon_atual': base_lon,
+                    'periodo': periodo, 'ordem': ordem_global,
+                    'hora_inicio': estado['time'], 'hora_fim': ret_fim,
+                    'viagem_min': viagem_ret, 'dist_km': dist_ret
+                })
 
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     geoms_and_durs = list(executor.map(fetch_geom_wrapper, rotas_flat))
-                    
-                ordem_global = 1
-                current_periodo = -1
-                current_time = None
-                lunch_added = False
 
                 for item, (geom, dur_sec) in zip(rotas_flat, geoms_and_durs):
-                    if item['periodo'] != current_periodo:
-                        current_periodo = item['periodo']
-                        current_time = pd.to_datetime(f'2026-01-{current_periodo:02d} 08:00:00')
-                        lunch_added = False
-                    
-                    viagem_min = dur_sec / 60.0
-                    
-                    if current_time.hour >= 12 and not lunch_added and not item['is_retorno']:
-                        lunch_start = current_time
-                        lunch_end = current_time + pd.Timedelta(hours=1)
+                    if item['is_lunch']:
                         state['routed_data'].append({
                             'PROTOCOLO': 'PAUSA_ALMOCO', 'NOME': '🍔 ALMOÇO DA EQUIPE', 
-                            'LATITUDE': item['lat_ant'], 'LONGITUDE': item['lon_ant'],
-                            'BASE_ATRIBUIDA': b_name, 'ORDEM': ordem_global, 
+                            'LATITUDE': item['lat_atual'], 'LONGITUDE': item['lon_atual'],
+                            'BASE_ATRIBUIDA': b_name, 'ORDEM': item['ordem'], 
                             'SEMANA': item['periodo'] if cfg['tipo_periodo'] == "Semana" else 1,
                             'DIA': item['periodo'] if cfg['tipo_periodo'] == "Dia" else 1, 
                             'PERIODO': item['periodo'],
                             'DISTANCIA_PONTO_ANTERIOR_KM': 0.0, 'TEMPO_VIAGEM_MINUTOS': 0.0,
-                            'ROTA_GEOMETRIA': [[item['lon_ant'], item['lat_ant']], [item['lon_ant'], item['lat_ant']]],
+                            'ROTA_GEOMETRIA': [[item['lon_atual'], item['lat_atual']], [item['lon_atual'], item['lat_atual']]],
                             'PRIORIDADE': 'Não',
-                            'HORA_INICIO': lunch_start.strftime('%Y-%m-%d %H:%M:%S'),
-                            'HORA_FIM': lunch_end.strftime('%Y-%m-%d %H:%M:%S')
+                            'HORA_INICIO': item['hora_inicio'].strftime('%H:%M'),
+                            'HORA_FIM': item['hora_fim'].strftime('%H:%M'),
+                            '_HORA_INICIO_DT': item['hora_inicio'], '_HORA_FIM_DT': item['hora_fim']
                         })
-                        current_time = lunch_end
-                        ordem_global += 1
-                        lunch_added = True
-
-                    hora_chegada = current_time + pd.Timedelta(minutes=viagem_min)
-
-                    if item['is_retorno']:
-                        dist_km = haversine_vectorized(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'])
+                    elif item['is_retorno']:
                         state['routed_data'].append({
                             'PROTOCOLO': 'RETORNO_BASE', 'NOME': 'BASE_RETORNO', 
                             'LATITUDE': item['lat_atual'], 'LONGITUDE': item['lon_atual'],
-                            'BASE_ATRIBUIDA': b_name, 'ORDEM': ordem_global, 
+                            'BASE_ATRIBUIDA': b_name, 'ORDEM': item['ordem'], 
                             'SEMANA': item['periodo'] if cfg['tipo_periodo'] == "Semana" else 1,
                             'DIA': item['periodo'] if cfg['tipo_periodo'] == "Dia" else 1, 
                             'PERIODO': item['periodo'],
-                            'DISTANCIA_PONTO_ANTERIOR_KM': round(dist_km, 2), 
-                            'TEMPO_VIAGEM_MINUTOS': round(viagem_min, 1),
+                            'DISTANCIA_PONTO_ANTERIOR_KM': round(item['dist_km'], 2), 
+                            'TEMPO_VIAGEM_MINUTOS': round(item['viagem_min'], 1),
                             'ROTA_GEOMETRIA': geom, 'PRIORIDADE': 'Não',
-                            'HORA_INICIO': hora_chegada.strftime('%Y-%m-%d %H:%M:%S'),
-                            'HORA_FIM': hora_chegada.strftime('%Y-%m-%d %H:%M:%S')
+                            'HORA_INICIO': item['hora_inicio'].strftime('%H:%M'),
+                            'HORA_FIM': item['hora_fim'].strftime('%H:%M'),
+                            '_HORA_INICIO_DT': item['hora_inicio'], '_HORA_FIM_DT': item['hora_fim']
                         })
-                        current_time = hora_chegada
                     else:
                         obra = item['obra']
-                        obra['ORDEM'] = ordem_global
+                        obra['ORDEM'] = item['ordem']
                         obra['SEMANA'] = item['periodo'] if cfg['tipo_periodo'] == "Semana" else 1
                         obra['DIA'] = item['periodo'] if cfg['tipo_periodo'] == "Dia" else 1
                         obra['PERIODO'] = item['periodo']
-                        obra['DISTANCIA_PONTO_ANTERIOR_KM'] = round(haversine_vectorized(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual']), 2)
-                        obra['TEMPO_VIAGEM_MINUTOS'] = round(viagem_min, 1)
+                        obra['DISTANCIA_PONTO_ANTERIOR_KM'] = round(item['dist_km'], 2)
+                        obra['TEMPO_VIAGEM_MINUTOS'] = round(item['viagem_min'], 1)
                         obra['ROTA_GEOMETRIA'] = geom
-                        
-                        tempo_exec_min = cfg['tempo_medio_obra'] * 60
-                        hora_saida = hora_chegada + pd.Timedelta(minutes=tempo_exec_min)
-                        
-                        obra['HORA_INICIO'] = hora_chegada.strftime('%Y-%m-%d %H:%M:%S')
-                        obra['HORA_FIM'] = hora_saida.strftime('%Y-%m-%d %H:%M:%S')
+                        obra['HORA_INICIO'] = item['hora_inicio'].strftime('%H:%M')
+                        obra['HORA_FIM'] = item['hora_fim'].strftime('%H:%M')
+                        obra['_HORA_INICIO_DT'] = item['hora_inicio']
+                        obra['_HORA_FIM_DT'] = item['hora_fim']
                         
                         state['routed_data'].append(obra)
-                        current_time = hora_saida
-                    
-                    ordem_global += 1
 
             state['b_idx'] += 1
             st.rerun()
