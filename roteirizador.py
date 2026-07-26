@@ -487,7 +487,10 @@ def view_roteirizador():
             
         st.markdown("---")
         st.markdown("### 📡 Conexão de Roteamento")
-        url_osrm_base = st.text_input("Endpoint OSRM:", value="http://router.project-osrm.org", disabled=is_locked)
+        # --- AVISO E EXPANDER INSERIDOS AQUI ---
+        url_osrm_base = st.text_input("Endpoint OSRM ⚠️ (NÃO APAGUE OU EDITE):", value="http://router.project-osrm.org", disabled=is_locked)
+        with st.expander("❓ Por que não devo alterar este link?"):
+            st.caption("Este link conecta o sistema à malha viária real de ruas do mundo. **Se você apagar ou editar este link incorretamente:** o sistema não vai quebrar ou travar, mas passará a calcular todas as rotas e distâncias em **linhas retas**, ignorando as calçadas, sentidos e curvas do mapa.")
         
         st.markdown("---")
         timer_placeholder = st.empty()
