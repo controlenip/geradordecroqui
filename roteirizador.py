@@ -75,20 +75,21 @@ http_session = get_retry_session()
 # ==========================================
 st.markdown("""
 <style>
-    /* Remover completamente os cabeçalhos, rodapés e botões do Streamlit Cloud */
-    header { display: none !important; }
+    /* Ocultar cabeçalhos, rodapés e botões de desenvolvedor com seletores seguros */
     [data-testid="stHeader"] { display: none !important; }
-    #MainMenu { display: none !important; }
-    .stDeployButton { display: none !important; }
     [data-testid="stToolbar"] { display: none !important; }
-    .viewerBadge_container { display: none !important; }
-    [data-testid="manage-app-button"] { display: none !important; }
+    .stDeployButton { display: none !important; }
+    #MainMenu { display: none !important; }
     footer { display: none !important; }
     
-    /* Regra agressiva para sumir com o botão Manage App que aparece solto no DOM */
-    .stApp > div:last-child > div:last-child { display: none !important; }
-    
-    .block-container { padding-top: 1.5rem !important; padding-bottom: 2rem !important; }
+    /* Ocultar botão flutuante Manage App do Streamlit Cloud */
+    .viewerBadge_container, 
+    .viewerBadge_link, 
+    [data-testid="manage-app-button"] { 
+        display: none !important; 
+    }
+
+    .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
     .stSelectbox label, .stFileUploader label, .stRadio label, .stNumberInput label, .stMultiSelect label { font-size: 14px !important; font-weight: 700 !important; color: #0D256C !important; }
     .stepper-container { display: flex; justify-content: space-between; margin-top: 0.5rem; margin-bottom: 1.5rem; padding: 0.85rem 1.2rem; background: rgba(13, 37, 108, 0.04); border-radius: 10px; border: 1px solid rgba(13, 37, 108, 0.12); }
     .step-item { font-size: 13px; font-weight: 700; color: #6c757d; display: flex; align-items: center; gap: 6px; }
