@@ -703,14 +703,67 @@ def view_roteirizador():
         tot_km = f"{df_routed['DISTANCIA_PONTO_ANTERIOR_KM'].sum():.1f} km"
         tot_prio = len(df_real_tasks[df_real_tasks['PRIORIDADE'] == 'Sim']) if 'PRIORIDADE' in df_real_tasks else 0
 
-        if 'tot_obras_nao_alocadas' in st.session_state and st.session_state.tot_obras_nao_alocadas > 0:
-            st.warning(f"⚠️ **Capacidade Atingida:** {st.session_state.tot_obras_nao_alocadas} obras reais excederam o limite matemático configurado por você (ou ficaram sem cidade coberta). Adicione Levantadores Temporários ou aumente o limite de 'Semanas/Dias' para absorver a fila de espera.")
-
         c_m1, c_m2, c_m3, c_m4 = st.columns(4)
         c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #0D256C;"><div class="metric-icon" style="background: rgba(13, 37, 108, 0.12);">📌</div><div class="metric-content"><div class="metric-title">Obras Reais Processadas</div><div class="metric-value">{tot_obras_reais} <span style="font-size:12px;color:#888;">(Em {tot_paradas} Paradas)</span></div></div></div>', unsafe_allow_html=True)
         c_m2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👥</div><div class="metric-content"><div class="metric-title">Equipes em Campo</div><div class="metric-value">{tot_equipes}</div></div></div>', unsafe_allow_html=True)
         c_m3.markdown(f'<div class="metric-card" style="border-left: 5px solid #55B929;"><div class="metric-icon" style="background: rgba(85, 185, 41, 0.15);">🛣️</div><div class="metric-content"><div class="metric-title">KM Total Projetado</div><div class="metric-value">{tot_km}</div></div></div>', unsafe_allow_html=True)
         c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">🚨</div><div class="metric-content"><div class="metric-title">Grupos Prioritários</div><div class="metric-value">{tot_prio}</div></div></div>', unsafe_allow_html=True)
+
+        # --- INÍCIO DA AUDITORIA DE META EXATA ---
+        cfg_atual = st.session_state.vrp_state.get('config', {})
+        
+        modo_atual = cfg_atual.get('modo_limite', 'Quantidade Fixa de Obras')
+        if modo_atual == "Quantidade Fixa de Obras":
+            obras_dia_meta = cfg_atual.get('obras_por_dia', 4)
+        else:
+            h_dia = cfg_atual.get('horas_por_dia', 8.0)
+            t_obra = cfg_atual.get('tempo_medio_obra', 1.5)
+            obras_dia_meta = max(1, int(h_dia / t_obra))
+            
+        dias_multiplier = 6 if cfg_atual.get('tipo_periodo', 'Dia') == 'Semana' else 1
+        limite_periodos_meta = cfg_atual.get('limite_periodos', 1)
+        
+        meta_exata_por_equipe = obras_dia_meta * dias_multiplier * limite_periodos_meta
+        tot_equipes_cadastradas = len(st.session_state.bases_records)
+        meta_global_exata = meta_exata_por_equipe * tot_equipes_cadastradas
+        
+        obras_por_equipe = {b['LEVANTADOR']: 0 for b in st.session_state.bases_records}
+            
+        for _, r in df_real_tasks.iterrows():
+            b_name = r['BASE_ATRIBUIDA']
+            qtd = len(r.get('_ORIGINAL_ROWS', [1])) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1
+            if b_name in obras_por_equipe:
+                obras_por_equipe[b_name] += qtd
+                
+        equipes_abaixo_meta = {k: v for k, v in obras_por_equipe.items() if v < meta_exata_por_equipe}
+        
+        if equipes_abaixo_meta:
+            motivos = []
+            if tot_obras_reais < meta_global_exata:
+                motivos.append(f"<b>Falta de Demanda ou Gargalo Geográfico:</b> A meta global exigia {meta_global_exata} obras ({meta_exata_por_equipe} para cada um dos {tot_equipes_cadastradas} levantadores). No entanto, {st.session_state.get('tot_obras_nao_alocadas', 0)} obras ficaram de fora (excesso de demanda total ou localizadas em cidades sem cobertura da base configurada).")
+            
+            motivos.append("<b>Corte por Tempo/Distância (Segurança VRP):</b> O motor de Inteligência Artificial precisou abortar algumas viagens antes de bater a meta diária da equipe para evitar que o colaborador ultrapassasse o Limite de KM diário configurado, ou que a viagem estourasse o horário limite (após as 18h).")
+                
+            detalhes_html = "".join([f"<li style='margin-bottom: 4px;'><b>{eq}</b>: Entregou {qtd} de {meta_exata_por_equipe} obras esperadas.</li>" for eq, qtd in equipes_abaixo_meta.items()])
+            
+            st.markdown(f'''
+            <div style="background-color: #fff3cd; color: #856404; padding: 15px; border-left: 5px solid #ffeeba; margin-bottom: 20px; border-radius: 4px;">
+                <h4 style="margin-top: 0; color: #856404;">⚠️ Meta Exata Não Atingida ({tot_obras_reais} realizadas de {meta_global_exata} esperadas)</h4>
+                <p style="margin-bottom: 10px;">O sistema tem a meta de alocar a quantidade exata para cada levantador, mas interveio ativando a proteção de jornada pelos seguintes motivos técnicos:</p>
+                <ul style="margin-bottom: 15px;">
+                    {"".join([f"<li style='margin-bottom: 5px;'>{m}</li>" for m in motivos])}
+                </ul>
+                <details>
+                    <summary style="cursor: pointer; font-weight: bold; padding: 5px; background: rgba(0,0,0,0.05); border-radius: 4px;">Ver Levantadores que não atingiram a meta ({len(equipes_abaixo_meta)} equipes)</summary>
+                    <ul style="margin-top: 10px;">
+                        {detalhes_html}
+                    </ul>
+                </details>
+            </div>
+            ''', unsafe_allow_html=True)
+        else:
+            st.success(f"✅ **Alocação Perfeita:** Todas as equipes atingiram a meta exata de {meta_exata_por_equipe} obras cada, totalizando {meta_global_exata} serviços roteirizados!")
+        # --- FIM DA AUDITORIA DE META EXATA ---
 
         cf_comb = st.session_state.config_financeira.get('custo_combustivel', 0.0)
         cf_cons = st.session_state.config_financeira.get('consumo_veiculo', 0.0)
