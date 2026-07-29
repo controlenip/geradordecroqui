@@ -829,7 +829,7 @@ def view_roteirizador():
         st_folium(mapa, use_container_width=True, height=550, returned_objects=[])
 
         st.markdown("<br>", unsafe_allow_html=True)
-        tab_dados, tab_gantt = st.tabs(["📊 Dados Tabulares e Arquivos", "⏱️ Timeline Interativa (Gantt)"])
+        tab_dados, tab_gantt = st.tabs(["📊 Dados Tabulares", "⏱️ Timeline Interativa (Gantt)"])
 
         with tab_dados:
             st.markdown("#### Detalhamento de Rotas")
@@ -1043,6 +1043,7 @@ def view_roteirizador():
                         
                         virar_dia = False
                         
+                        # Correção de Calendário (Bug Invisível Consertado)
                         if fim_previsto.hour >= 18 or fim_previsto.date() > estado['time'].date():
                             virar_dia = True
                             
@@ -1454,9 +1455,9 @@ def view_roteirizador():
         df_tasks['LATITUDE'] = pd.to_numeric(df_tasks['LATITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
         df_tasks['LONGITUDE'] = pd.to_numeric(df_tasks['LONGITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
 
-        c_ex1, c_ex2 = st.columns(2)
+        tipos_prioritarios_selecionados = []
         with st.expander("🛠️ 4. Configuração de Filtros Iniciais", expanded=True):
-            c_filt1, c_filt2 = st.columns(2)
+            c_filt1, c_filt2, c_filt3 = st.columns(3)
             
             if 'STATUS LIST' in df_tasks.columns:
                 df_tasks['STATUS_LIMPO'] = df_tasks['STATUS LIST'].astype(str).str.strip().str.upper()
@@ -1471,6 +1472,9 @@ def view_roteirizador():
                 tipos_selecionados = c_filt2.multiselect("🏷️ Filtrar TIPO DE NOTA (Todas as Obras):", tipos_nota_unicos, default=tipos_nota_unicos)
                 if not tipos_selecionados: st.warning("Selecione um Tipo de Nota."); return
                 df_tasks = df_tasks[df_tasks['TIPO NOTA'].astype(str).isin(tipos_selecionados)]
+                
+                padroes_prio = [t for t in tipos_selecionados if t in TIPOS_PRIORITARIOS]
+                tipos_prioritarios_selecionados = c_filt3.multiselect("🚨 Definir Obras PRIORITÁRIAS:", tipos_selecionados, default=padroes_prio)
 
         erros_coords_mask = df_tasks['LATITUDE'].isna() | df_tasks['LONGITUDE'].isna() | (df_tasks['LATITUDE'] == 0.0) | (df_tasks['LONGITUDE'] == 0.0)
         qtd_erros_iniciais = erros_coords_mask.sum()
@@ -1522,7 +1526,7 @@ def view_roteirizador():
                 df_tasks = df_tasks[df_tasks[col_nome].astype(str).str.strip() != '']
                 
         if 'STATUS SAP' in df_tasks.columns: df_tasks = df_tasks[~df_tasks['STATUS SAP'].astype(str).str.strip().str.upper().isin(['CANC', 'FINL'])]
-        if 'TIPO NOTA' in df_tasks.columns: df_tasks['PRIORIDADE'] = df_tasks['TIPO NOTA'].apply(lambda x: 'Sim' if str(x).strip().upper() in TIPOS_PRIORITARIOS else 'Não')
+        if 'TIPO NOTA' in df_tasks.columns: df_tasks['PRIORIDADE'] = df_tasks['TIPO NOTA'].apply(lambda x: 'Sim' if str(x).strip().upper() in tipos_prioritarios_selecionados else 'Não')
         else: df_tasks['PRIORIDADE'] = 'Não'
 
         df_tasks, qtd_condensada = fundir_super_pontos(df_tasks, raio_metros=5)
