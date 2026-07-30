@@ -954,10 +954,13 @@ def view_roteirizador():
             st.markdown("### 📁 2. Upload de Demandas (Obras)")
             
             with st.container(border=True):
-                task_files = st.file_uploader("1️⃣ Base Principal", type=["xlsx", "xls"], accept_multiple_files=True)
+                task_files = st.file_uploader("1️⃣ Base Levantamento", type=["xlsx", "xls"], accept_multiple_files=True)
+                
+            with st.container(border=True):
+                saneamento_files = st.file_uploader("2️⃣ Base Saneamento", type=["xlsx", "xls"], accept_multiple_files=True)
             
             with st.container(border=True):
-                status_file = st.file_uploader("2️⃣ Planilha Atualizada SharePoint (Opcional)", type=["xlsx", "xls"])
+                status_file = st.file_uploader("3️⃣ Planilha Atualizada SharePoint (Opcional)", type=["xlsx", "xls"])
             
             df_status_upload = pd.DataFrame()
             coluna_status_selecionada = None
@@ -1016,17 +1019,28 @@ def view_roteirizador():
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
-            if not task_files: 
-                st.info("Aguardando upload de obras na Base Principal.")
+            if not task_files and not saneamento_files: 
+                st.info("Aguardando upload de obras na Base Levantamento ou Base Saneamento.")
                 return
 
             try:
                 dfs = []
-                for f in task_files:
-                    df_temp = ler_planilha_cached(f.getvalue())
-                    if len(dfs) == 0: st.session_state.colunas_originais = df_temp.columns.tolist()
-                    df_temp.columns = normalize_cols(df_temp.columns)
-                    dfs.append(df_temp)
+                if task_files:
+                    for f in task_files:
+                        df_temp = ler_planilha_cached(f.getvalue())
+                        if len(dfs) == 0: st.session_state.colunas_originais = df_temp.columns.tolist()
+                        df_temp.columns = normalize_cols(df_temp.columns)
+                        dfs.append(df_temp)
+                        
+                if saneamento_files:
+                    for f in saneamento_files:
+                        df_temp = ler_planilha_cached(f.getvalue())
+                        if len(dfs) == 0: st.session_state.colunas_originais = df_temp.columns.tolist()
+                        df_temp.columns = normalize_cols(df_temp.columns)
+                        dfs.append(df_temp)
+                        
+                if not dfs: return
+
                 df_tasks = pd.concat(dfs, ignore_index=True)
                 total_obras_inicial = len(df_tasks)
                 
