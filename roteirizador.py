@@ -658,15 +658,19 @@ def view_roteirizador():
             if tipo_periodo == "Semana":
                 st.caption("ℹ️ Na visão por Semana, o sistema agrupará 6 dias úteis (Seg-Sáb) em cada aba.")
                 
-            modo_limite = st.radio("Critério limitador:", ["Quantidade Fixa de Obras", "Carga Horária (Tempo Real)", "Forçar Quota Matemática (Trabalho 24h)"], disabled=is_locked)
+            tem_san = bool(st.session_state.get('san_uploader'))
+            modo_limite_opcoes = ["Quantidade Fixa de Obras", "Carga Horária (Tempo Real)", "Saneamento (Forçar Quota / 24h)"]
+            idx_padrao = 2 if tem_san else 0
+            
+            modo_limite = st.radio("Critério limitador:", modo_limite_opcoes, index=idx_padrao, disabled=is_locked)
             limite_km_diario = st.slider("Limite de KM por Dia", 0, 500, 500, 5, disabled=is_locked)
             
-            if modo_limite in ["Quantidade Fixa de Obras", "Forçar Quota Matemática (Trabalho 24h)"]:
+            if modo_limite in ["Quantidade Fixa de Obras", "Saneamento (Forçar Quota / 24h)"]:
                 obras_por_dia = st.number_input("Obras Previstas por Dia", min_value=1, value=4, step=1, disabled=is_locked)
                 limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
                 tempo_medio_obra = 1.5
                 velocidade_media_kmh = 30.0
-                horas_por_dia = 24.0 if modo_limite == "Forçar Quota Matemática (Trabalho 24h)" else 8.0
+                horas_por_dia = 24.0 if modo_limite == "Saneamento (Forçar Quota / 24h)" else 8.0
             else:
                 horas_por_dia = st.number_input("Horas por Dia", min_value=1.0, value=8.0, step=0.5, disabled=is_locked)
                 tempo_medio_obra = st.number_input("Tempo de execução/obra (Horas)", min_value=0.1, value=1.5, step=0.1, disabled=is_locked)
@@ -721,13 +725,13 @@ def view_roteirizador():
         tot_prio = len(df_real_tasks[df_real_tasks['PRIORIDADE'] == 'Sim']) if 'PRIORIDADE' in df_real_tasks else 0
 
         if 'tot_obras_nao_alocadas' in st.session_state and st.session_state.tot_obras_nao_alocadas > 0:
-            st.warning(f"⚠️ **Capacidade Atingida:** {st.session_state.tot_obras_nao_alocadas} obras reais excederam o limite matemático configurado por você (ou ficaram sem cidade coberta). Adicione Levantadores Temporários ou aumente o limite de 'Semanas/Dias' para absorver a fila de espera.")
+            st.warning(f"⚠️ **CAPACIDADE ATINGIDA:** {st.session_state.tot_obras_nao_alocadas} obras ficaram de fora. **DICA:** Para roteirizar todas as obras, vá no menu lateral esquerdo ('Esforço e Limites Diários') e aumente o número de 'Obras Previstas por Dia' ou o 'Limite total de Dias/Semanas'.")
 
         c_m1, c_m2, c_m3, c_m4 = st.columns(4)
-        c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #0D256C;"><div class="metric-icon" style="background: rgba(13, 37, 108, 0.12);">📌</div><div class="metric-content"><div class="metric-title">Obras Reais Processadas</div><div class="metric-value">{tot_obras_reais} <span style="font-size:12px;color:#888;">(Em {tot_paradas} Paradas)</span></div></div></div>', unsafe_allow_html=True)
-        c_m2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👥</div><div class="metric-content"><div class="metric-title">Equipes em Campo</div><div class="metric-value">{tot_equipes}</div></div></div>', unsafe_allow_html=True)
+        c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #0D256C;"><div class="metric-icon" style="background: rgba(13, 37, 108, 0.12);">🎯</div><div class="metric-content"><div class="metric-title">TOTAL DE OBRAS ROTEIRIZADAS</div><div class="metric-value">{tot_obras_reais} <span style="font-size:12px;color:#888;">(Em {tot_paradas} Pontos)</span></div></div></div>', unsafe_allow_html=True)
+        c_m2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👥</div><div class="metric-content"><div class="metric-title">Equipes Alocadas</div><div class="metric-value">{tot_equipes}</div></div></div>', unsafe_allow_html=True)
         c_m3.markdown(f'<div class="metric-card" style="border-left: 5px solid #55B929;"><div class="metric-icon" style="background: rgba(85, 185, 41, 0.15);">🛣️</div><div class="metric-content"><div class="metric-title">KM Total Projetado</div><div class="metric-value">{tot_km}</div></div></div>', unsafe_allow_html=True)
-        c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">🚨</div><div class="metric-content"><div class="metric-title">Grupos Prioritários</div><div class="metric-value">{tot_prio}</div></div></div>', unsafe_allow_html=True)
+        c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">🚨</div><div class="metric-content"><div class="metric-title">Prioridades</div><div class="metric-value">{tot_prio}</div></div></div>', unsafe_allow_html=True)
 
         cf_comb = st.session_state.config_financeira.get('custo_combustivel', 0.0)
         cf_cons = st.session_state.config_financeira.get('consumo_veiculo', 0.0)
@@ -958,10 +962,10 @@ def view_roteirizador():
             st.markdown("### 📁 2. Upload de Demandas (Obras)")
             
             with st.container(border=True):
-                task_files = st.file_uploader("1️⃣ Base Levantamento", type=["xlsx", "xls"], accept_multiple_files=True)
+                task_files = st.file_uploader("1️⃣ Base Levantamento", type=["xlsx", "xls"], accept_multiple_files=True, key="lev_uploader")
                 
             with st.container(border=True):
-                saneamento_files = st.file_uploader("2️⃣ Base Saneamento", type=["xlsx", "xls"], accept_multiple_files=True)
+                saneamento_files = st.file_uploader("2️⃣ Base Saneamento", type=["xlsx", "xls"], accept_multiple_files=True, key="san_uploader")
             
             with st.container(border=True):
                 status_file = st.file_uploader("3️⃣ Planilha Atualizada SharePoint (Opcional)", type=["xlsx", "xls"])
@@ -1114,17 +1118,8 @@ def view_roteirizador():
                 
         if has_saneamento:
             with st.expander("🛠️ 4B. Filtros Iniciais - Base SANEAMENTO", expanded=True):
+                st.info("✅ Base de Saneamento detectada: Todas as obras foram aprovadas automaticamente para o roteamento (sem filtros de área).")
                 df_san = df_tasks[df_tasks['_ORIGEM_BASE'] == 'SANEAMENTO'].copy()
-                
-                col_area = 'CLASSIFICACAO AREA' if 'CLASSIFICACAO AREA' in df_san.columns else None
-                if col_area:
-                    areas_brutas = [str(x).strip().upper() for x in df_san[col_area].unique() if pd.notna(x) and str(x).lower() != 'nan']
-                    areas_unicas = sorted(list(set(areas_brutas)))
-                    
-                    areas_selecionadas = st.multiselect("🗺️ Filtrar CLASSIFICAÇÃO ÁREA:", options=areas_unicas, default=areas_unicas)
-                    if not areas_selecionadas: st.warning("Selecione uma classificação de área."); return
-                    df_san = df_san[df_san[col_area].astype(str).str.strip().str.upper().isin(areas_selecionadas)]
-
                 df_san['PRIORIDADE'] = 'Não'
                 df_list.append(df_san)
 
@@ -1528,11 +1523,11 @@ def view_roteirizador():
                         
                         virar_dia = False
                         
-                        if cfg['modo_limite'] != "Forçar Quota Matemática (Trabalho 24h)":
+                        if cfg['modo_limite'] != "Saneamento (Forçar Quota / 24h)":
                             if fim_previsto.hour >= 18 or fim_previsto.date() > estado['time'].date():
                                 virar_dia = True
                             
-                        if cfg['modo_limite'] in ["Quantidade Fixa de Obras", "Forçar Quota Matemática (Trabalho 24h)"] and obras_no_periodo_macro >= cfg['obras_por_dia']:
+                        if cfg['modo_limite'] in ["Quantidade Fixa de Obras", "Saneamento (Forçar Quota / 24h)"] and obras_no_periodo_macro >= cfg['obras_por_dia']:
                             virar_dia = True
                             
                         if estado.get('km_hoje', 0.0) + viagem_km > cfg.get('limite_km_diario', 500):
