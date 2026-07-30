@@ -1115,24 +1115,13 @@ def view_roteirizador():
         if has_saneamento:
             with st.expander("🛠️ 4B. Filtros Iniciais - Base SANEAMENTO", expanded=True):
                 df_san = df_tasks[df_tasks['_ORIGEM_BASE'] == 'SANEAMENTO'].copy()
-                c_filt1, c_filt2 = st.columns(2)
                 
-                col_eq = 'CODIGO EQUIPE' if 'CODIGO EQUIPE' in df_san.columns else ('AG - CODIGO EQUIPE' if 'AG - CODIGO EQUIPE' in df_san.columns else None)
-                if col_eq:
-                    equipes_brutas = [str(x).strip().upper() for x in df_san[col_eq].unique() if pd.notna(x) and str(x).lower() != 'nan']
-                    equipes_unicas = sorted(list(set(equipes_brutas)))
-                    equipes_default = [e for e in equipes_unicas if not e.startswith('U')]
-                    
-                    equipes_selecionadas = c_filt1.multiselect("👷 Filtrar CÓDIGO EQUIPE:", options=equipes_unicas, default=equipes_default)
-                    if not equipes_selecionadas: st.warning("Selecione uma equipe de Saneamento."); return
-                    df_san = df_san[df_san[col_eq].astype(str).str.strip().str.upper().isin(equipes_selecionadas)]
-
                 col_area = 'CLASSIFICACAO AREA' if 'CLASSIFICACAO AREA' in df_san.columns else None
                 if col_area:
                     areas_brutas = [str(x).strip().upper() for x in df_san[col_area].unique() if pd.notna(x) and str(x).lower() != 'nan']
                     areas_unicas = sorted(list(set(areas_brutas)))
                     
-                    areas_selecionadas = c_filt2.multiselect("🗺️ Filtrar CLASSIFICAÇÃO ÁREA:", options=areas_unicas, default=areas_unicas)
+                    areas_selecionadas = st.multiselect("🗺️ Filtrar CLASSIFICAÇÃO ÁREA:", options=areas_unicas, default=areas_unicas)
                     if not areas_selecionadas: st.warning("Selecione uma classificação de área."); return
                     df_san = df_san[df_san[col_area].astype(str).str.strip().str.upper().isin(areas_selecionadas)]
 
