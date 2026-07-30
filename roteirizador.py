@@ -1186,10 +1186,12 @@ def view_roteirizador():
             st.toast(f"✅ Inteligência condensou {qtd_condensada} obras repetidas no mesmo endereço em 'Super Pontos'.")
 
         st.markdown("#### 📊 Raio-X da Base de Dados Carregada")
+        tot_obras_aprovadas = sum(len(r.get('_ORIGINAL_ROWS', [1])) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1 for _, r in df_tasks.iterrows())
+        
         st.markdown(f"""
         <div class="profiling-box">
-            <b>Análise Estrutural:</b> Das {total_obras_inicial} linhas encontradas, o sistema filtrou e aprovou <b style="color: #0D256C;">{len(df_tasks)} paradas únicas</b> para roteamento. <br>
-            <i>(Omitidos: {qtd_erros_coords_finais} sem coordenadas resolvíveis | {erros_nome} sem nome de cliente | Restante fora do status padrão).</i>
+            <b>Análise Estrutural:</b> Das {total_obras_inicial} linhas encontradas, o sistema aprovou <b style="color: #0D256C;">{tot_obras_aprovadas} obras reais</b> (compactadas em {len(df_tasks)} paradas físicas no mapa). <br>
+            <i>(Omitidas: {qtd_erros_coords_finais} sem coordenadas resolvíveis | {erros_nome} sem nome de cliente).</i>
         </div>
         """, unsafe_allow_html=True)
 
