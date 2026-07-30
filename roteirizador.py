@@ -826,7 +826,7 @@ def view_roteirizador():
                         <div style="padding:10px; background:#fafafa; font-size:12px;">
                             <table style="width:100%; border-collapse:collapse;">
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} (Dia {r.get('DIA', 0)})</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
@@ -1087,15 +1087,18 @@ def view_roteirizador():
                 c_filt1, c_filt2, c_filt3 = st.columns(3)
                 
                 if 'STATUS LIST' in df_lev.columns:
-                    df_lev['STATUS_LIMPO'] = df_lev['STATUS LIST'].astype(str).str.strip().str.upper()
-                    status_unicos = sorted(df_lev['STATUS_LIMPO'].unique().tolist())
+                    status_brutos = [str(x).strip().upper() for x in df_lev['STATUS LIST'].unique() if pd.notna(x) and str(x).lower() != 'nan']
+                    status_unicos = sorted(list(set(status_brutos)))
                     padroes_ativos = [s for s in status_unicos if s in STATUS_PADRAO]
                     status_selecionados = c_filt1.multiselect("📌 Filtrar Status de Início:", options=status_unicos, default=padroes_ativos)
                     if not status_selecionados: st.warning("Selecione um status."); return
+                    
+                    df_lev['STATUS_LIMPO'] = df_lev['STATUS LIST'].astype(str).str.strip().str.upper()
                     df_lev = df_lev[df_lev['STATUS_LIMPO'].isin(status_selecionados)].drop(columns=['STATUS_LIMPO'])
 
                 if 'TIPO NOTA' in df_lev.columns:
-                    tipos_nota_unicos = sorted(df_lev['TIPO NOTA'].astype(str).dropna().unique().tolist())
+                    tipos_nota_brutos = [str(x).strip().upper() for x in df_lev['TIPO NOTA'].unique() if pd.notna(x) and str(x).lower() != 'nan']
+                    tipos_nota_unicos = sorted(list(set(tipos_nota_brutos)))
                     tipos_selecionados = c_filt2.multiselect("🏷️ Filtrar TIPO DE NOTA (Todas as Obras):", tipos_nota_unicos, default=tipos_nota_unicos)
                     if not tipos_selecionados: st.warning("Selecione um Tipo de Nota."); return
                     df_lev = df_lev[df_lev['TIPO NOTA'].astype(str).isin(tipos_selecionados)]
@@ -1116,16 +1119,19 @@ def view_roteirizador():
                 
                 col_eq = 'CODIGO EQUIPE' if 'CODIGO EQUIPE' in df_san.columns else ('AG - CODIGO EQUIPE' if 'AG - CODIGO EQUIPE' in df_san.columns else None)
                 if col_eq:
-                    df_san['EQ_STR'] = df_san[col_eq].astype(str).str.strip().str.upper()
-                    equipes_unicas = sorted(df_san['EQ_STR'].unique().tolist())
-                    equipes_default = [e for e in equipes_unicas if not str(e).startswith('U')]
+                    equipes_brutas = [str(x).strip().upper() for x in df_san[col_eq].unique() if pd.notna(x) and str(x).lower() != 'nan']
+                    equipes_unicas = sorted(list(set(equipes_brutas)))
+                    equipes_default = [e for e in equipes_unicas if not e.startswith('U')]
+                    
                     equipes_selecionadas = c_filt1.multiselect("👷 Filtrar CÓDIGO EQUIPE:", options=equipes_unicas, default=equipes_default)
                     if not equipes_selecionadas: st.warning("Selecione uma equipe de Saneamento."); return
-                    df_san = df_san[df_san['EQ_STR'].isin(equipes_selecionadas)].drop(columns=['EQ_STR'])
+                    df_san = df_san[df_san[col_eq].astype(str).str.strip().str.upper().isin(equipes_selecionadas)]
 
                 col_area = 'CLASSIFICACAO AREA' if 'CLASSIFICACAO AREA' in df_san.columns else None
                 if col_area:
-                    areas_unicas = sorted(df_san[col_area].astype(str).str.strip().str.upper().unique().tolist())
+                    areas_brutas = [str(x).strip().upper() for x in df_san[col_area].unique() if pd.notna(x) and str(x).lower() != 'nan']
+                    areas_unicas = sorted(list(set(areas_brutas)))
+                    
                     areas_selecionadas = c_filt2.multiselect("🗺️ Filtrar CLASSIFICAÇÃO ÁREA:", options=areas_unicas, default=areas_unicas)
                     if not areas_selecionadas: st.warning("Selecione uma classificação de área."); return
                     df_san = df_san[df_san[col_area].astype(str).str.strip().str.upper().isin(areas_selecionadas)]
