@@ -672,26 +672,27 @@ def view_roteirizador():
                 else:
                     st.caption(f"ℹ️ Cada semana terá **{len(dias_semana_selecionados)} dias** alocados.")
                 
-            tem_san = bool(st.session_state.get('san_uploader'))
-            modo_limite_opcoes = ["Quantidade Fixa de Obras", "Carga Horária (Tempo Real)", "Saneamento (Forçar Quota / 24h)"]
-            idx_padrao = 2 if tem_san else 0
+            obras_por_dia = st.number_input("Obras Previstas por Dia (Por Equipe)", min_value=1, value=30, step=1, disabled=is_locked)
+            limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
             
-            modo_limite = st.radio("Critério limitador:", modo_limite_opcoes, index=idx_padrao, disabled=is_locked)
-            limite_km_diario = st.slider("Limite de KM por Dia", 0, 500, 500, 5, disabled=is_locked)
-            
-            if modo_limite in ["Quantidade Fixa de Obras", "Saneamento (Forçar Quota / 24h)"]:
-                obras_por_dia = st.number_input("Obras Previstas por Dia", min_value=1, value=4, step=1, disabled=is_locked)
-                limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
-                tempo_medio_obra = 1.5
-                velocidade_media_kmh = 30.0
-                horas_por_dia = 24.0 if modo_limite == "Saneamento (Forçar Quota / 24h)" else 8.0
+            qtd_equipes = len(st.session_state.get("bases_records", []))
+            if qtd_equipes == 0:
+                qtd_equipes = 17 
+                
+            dias_mult = len(dias_semana_selecionados) if tipo_periodo == "Semana" else 1
+            total_dias_trabalho = dias_mult * limite_periodos
+            cap_total = obras_por_dia * total_dias_trabalho * qtd_equipes
+
+            if tipo_periodo == "Semana":
+                texto_dias = f"{len(dias_semana_selecionados)} dias/semana × {limite_periodos} semanas"
             else:
-                horas_por_dia = st.number_input("Horas por Dia", min_value=1.0, value=8.0, step=0.5, disabled=is_locked)
-                tempo_medio_obra = st.number_input("Tempo de execução/obra (Horas)", min_value=0.1, value=1.5, step=0.1, disabled=is_locked)
-                velocidade_media_kmh = st.number_input("Velocidade (km/h)", min_value=10.0, value=30.0, step=5.0, disabled=is_locked)
-                limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
-                obras_por_dia = int(horas_por_dia / tempo_medio_obra)
-                if obras_por_dia < 1: obras_por_dia = 1
+                texto_dias = f"{limite_periodos} dias"
+
+            st.success(f"💡 **Cálculo de Capacidade:** {obras_por_dia} obras/dia × {texto_dias} × {qtd_equipes} equipes = **{cap_total} obras de capacidade total**.")
+            st.caption("✅ Travas de limite diário de KM e Expediente (18h) desativadas. O sistema respeitará estritamente a quantidade máxima de obras definida acima.")
+            
+            tempo_medio_obra = st.number_input("Tempo de execução/obra (Horas)", min_value=0.1, value=0.5, step=0.1, disabled=is_locked, help="Apenas para simular os horários na planilha.")
+            velocidade_media_kmh = st.number_input("Velocidade Média (km/h)", min_value=10.0, value=30.0, step=5.0, disabled=is_locked)
 
         with st.expander("💰 Custos e Gestão Financeira", expanded=False):
             custo_combustivel = st.number_input("Custo Combustível (R$/L)", min_value=0.0, value=0.0, step=0.1, disabled=is_locked)
@@ -1262,14 +1263,7 @@ def view_roteirizador():
             base_counts = {b['LEVANTADOR']: 0 for b in todas_bases_records}
             
             dias_multiplier = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
-            
-            if modo_limite == "Quantidade Fixa de Obras":
-                obras_dia_est = obras_por_dia
-            else:
-                obras_dia_est = int(horas_por_dia / tempo_medio_obra)
-                if obras_dia_est < 1: obras_dia_est = 1
-                
-            max_capacity = obras_dia_est * dias_multiplier * limite_periodos
+            max_capacity = obras_por_dia * dias_multiplier * limite_periodos
 
             def assign_load_balanced(df_sub, allowed_bases, is_prio=False):
                 if df_sub.empty or not allowed_bases: return pd.DataFrame(), df_sub.copy()
@@ -1304,9 +1298,6 @@ def view_roteirizador():
                                 if pd.notna(b_lat) and pd.notna(b_lon):
                                     d = haversine_scalar(lat, lon, float(b_lat), float(b_lon))
                                     
-                                    if tipo_atribuicao == "Por Proximidade Geográfica das Coordenadas (Ignora texto)" and d > 100.0:
-                                        continue 
-                                        
                                     if d < best_dist:
                                         best_dist = d
                                         best_base = b_name
@@ -1384,8 +1375,8 @@ def view_roteirizador():
             
             st.session_state.vrp_state = {
                 'config': {
-                    'modo_limite': modo_limite, 'velocidade_media_kmh': velocidade_media_kmh,
-                    'tempo_medio_obra': tempo_medio_obra, 'horas_por_dia': horas_por_dia, 'limite_km_diario': limite_km_diario,
+                    'velocidade_media_kmh': velocidade_media_kmh,
+                    'tempo_medio_obra': tempo_medio_obra,
                     'obras_por_dia': obras_por_dia, 'tipo_periodo': tipo_periodo, 'limite_periodos': limite_periodos,
                     'dias_selecionados': dias_semana_selecionados
                 },
@@ -1554,14 +1545,7 @@ def view_roteirizador():
                         
                         virar_dia = False
                         
-                        if cfg['modo_limite'] != "Saneamento (Forçar Quota / 24h)":
-                            if fim_previsto.hour >= 18 or fim_previsto.date() > estado['time'].date():
-                                virar_dia = True
-                            
-                        if cfg['modo_limite'] in ["Quantidade Fixa de Obras", "Saneamento (Forçar Quota / 24h)"] and obras_no_periodo_macro >= cfg['obras_por_dia']:
-                            virar_dia = True
-                            
-                        if estado.get('km_hoje', 0.0) + viagem_km > cfg.get('limite_km_diario', 500):
+                        if obras_no_periodo_macro >= cfg['obras_por_dia']:
                             virar_dia = True
                                 
                         if virar_dia:
