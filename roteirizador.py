@@ -75,14 +75,12 @@ http_session = get_retry_session()
 # ==========================================
 st.markdown("""
 <style>
-    /* Ocultar cabeçalhos, rodapés e botões de desenvolvedor com seletores seguros */
     [data-testid="stHeader"] { display: none !important; }
     [data-testid="stToolbar"] { display: none !important; }
     .stDeployButton { display: none !important; }
     #MainMenu { display: none !important; }
     footer { display: none !important; }
     
-    /* Ocultar botão flutuante Manage App do Streamlit Cloud */
     .viewerBadge_container, 
     .viewerBadge_link, 
     [data-testid="manage-app-button"] { 
@@ -216,9 +214,15 @@ def fundir_super_pontos(df_tasks, raio_metros=5):
                 return " | ".join([str(x).strip() if pd.notna(x) else "-" for x in group[col_name]])
             
             if 'PROTOCOLO' in group.columns: row_base['PROTOCOLO'] = safe_list_join('PROTOCOLO')
+            if 'NOTA' in group.columns: row_base['NOTA'] = safe_list_join('NOTA')
             if 'CONTA CONTRATO' in group.columns: row_base['CONTA CONTRATO'] = safe_list_join('CONTA CONTRATO')
             if 'INSTALACAO' in group.columns: row_base['INSTALACAO'] = safe_list_join('INSTALACAO')
             if 'NOME' in group.columns: row_base['NOME'] = safe_list_join('NOME')
+            if 'STATUS' in group.columns: row_base['STATUS'] = safe_list_join('STATUS')
+            if 'STATUS CLIENTE' in group.columns: row_base['STATUS CLIENTE'] = safe_list_join('STATUS CLIENTE')
+            if 'TIPO DEMANDA' in group.columns: row_base['TIPO DEMANDA'] = safe_list_join('TIPO DEMANDA')
+            if 'TEL FIXO' in group.columns: row_base['TEL FIXO'] = safe_list_join('TEL FIXO')
+            if 'TEL MOVEL' in group.columns: row_base['TEL MOVEL'] = safe_list_join('TEL MOVEL')
                 
             row_base['LATITUDE'] = group['LATITUDE'].mean()
             row_base['LONGITUDE'] = group['LONGITUDE'].mean()
@@ -397,7 +401,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
             
     df_export = pd.DataFrame(unpacked_rows)
 
-    for col in ['ROTA_GEOMETRIA', 'STATUS LIST', 'INICIO AVARIA', 'STATUS ATUAL (LEVANTAMENTO)', 'DESCRICAO', '_HORA_INICIO_DT', '_HORA_FIM_DT', '_ORIGINAL_ROWS']:
+    for col in ['ROTA_GEOMETRIA', 'STATUS LIST', 'INICIO AVARIA', 'STATUS ATUAL (LEVANTAMENTO)', 'DESCRICAO', '_HORA_INICIO_DT', '_HORA_FIM_DT', '_ORIGINAL_ROWS', '_ORIGEM_BASE']:
         if col in df_export.columns: df_export = df_export.drop(columns=[col], errors='ignore')
 
     if colunas_originais:
@@ -556,7 +560,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         <div style="background:{pop_header_bg}; color:white; padding:10px; font-size:14px; font-weight:bold; text-align:center;">{pop_prio_txt}</div>
                         <div style="padding:10px; background:#fafafa; font-size:13px;">
                             <table style="width:100%; border-collapse:collapse; text-align:left;">
-                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; vertical-align:top; width:35%;">Protocolo:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{prot_html}</td></tr>
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{prot_html}</td></tr>
                                 <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Ordem:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('ORDEM', 0)} (Dia {r.get('DIA', 0)})</td></tr>
                                 <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Horário:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
                                 <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Ant.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
@@ -578,7 +582,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         nome_obra = str(r.get('NOME', ''))
                         if nome_obra.lower() == 'nan': nome_obra = ''
                         separador = " - " if nome_obra else ""
-                        nome_ponto = f"{tag_prio}[{r.get('ORDEM', 0)}] Prot: {html.escape(prot_str)}{separador}{html.escape(nome_obra)}"
+                        nome_ponto = f"{tag_prio}[{r.get('ORDEM', 0)}] Doc: {html.escape(prot_str)}{separador}{html.escape(nome_obra)}"
                         style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
 
                     kml_lines.append(f'        <Placemark><name>{nome_ponto}</name><description><![CDATA[{popup_html}]]></description><styleUrl>{style_url}</styleUrl><Point><coordinates>{lon},{lat},0</coordinates></Point></Placemark>')
@@ -821,8 +825,8 @@ def view_roteirizador():
                         <div style="background:{pop_header_bg}; color:white; padding:8px 10px; font-size:13px; font-weight:bold;">{pop_prio_txt}</div>
                         <div style="padding:10px; background:#fafafa; font-size:12px;">
                             <table style="width:100%; border-collapse:collapse;">
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} (Dia {r.get('DIA', 0)})</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
@@ -842,7 +846,7 @@ def view_roteirizador():
 
         with tab_dados:
             st.markdown("#### Detalhamento de Rotas")
-            df_display = st.session_state.df_routed.drop(columns=['ROTA_GEOMETRIA', '_HORA_INICIO_DT', '_HORA_FIM_DT', '_ORIGINAL_ROWS'], errors='ignore')
+            df_display = st.session_state.df_routed.drop(columns=['ROTA_GEOMETRIA', '_HORA_INICIO_DT', '_HORA_FIM_DT', '_ORIGINAL_ROWS', '_ORIGEM_BASE'], errors='ignore')
             
             df_editado_ui = st.data_editor(
                 df_display, use_container_width=True, height=400,
@@ -1028,21 +1032,36 @@ def view_roteirizador():
                 if task_files:
                     for f in task_files:
                         df_temp = ler_planilha_cached(f.getvalue())
-                        if len(dfs) == 0: st.session_state.colunas_originais = df_temp.columns.tolist()
+                        if len(dfs) == 0: st.session_state.colunas_originais_lev = df_temp.columns.tolist()
                         df_temp.columns = normalize_cols(df_temp.columns)
+                        df_temp['_ORIGEM_BASE'] = 'LEVANTAMENTO'
                         dfs.append(df_temp)
                         
                 if saneamento_files:
                     for f in saneamento_files:
                         df_temp = ler_planilha_cached(f.getvalue())
-                        if len(dfs) == 0: st.session_state.colunas_originais = df_temp.columns.tolist()
+                        if len(dfs) == 0: st.session_state.colunas_originais_san = df_temp.columns.tolist()
                         df_temp.columns = normalize_cols(df_temp.columns)
+                        df_temp['_ORIGEM_BASE'] = 'SANEAMENTO'
+                        
+                        if 'LATITUDE PROJETO' in df_temp.columns and 'LATITUDE' not in df_temp.columns:
+                            df_temp['LATITUDE'] = df_temp['LATITUDE PROJETO']
+                        if 'LONGITUDE PROJETO' in df_temp.columns and 'LONGITUDE' not in df_temp.columns:
+                            df_temp['LONGITUDE'] = df_temp['LONGITUDE PROJETO']
+                        
+                        if 'NOTA' in df_temp.columns and 'PROTOCOLO' not in df_temp.columns:
+                            df_temp['PROTOCOLO'] = df_temp['NOTA']
+                            
                         dfs.append(df_temp)
                         
                 if not dfs: return
 
                 df_tasks = pd.concat(dfs, ignore_index=True)
                 total_obras_inicial = len(df_tasks)
+                
+                cols_orig_lev = st.session_state.get('colunas_originais_lev', [])
+                cols_orig_san = st.session_state.get('colunas_originais_san', [])
+                st.session_state.colunas_originais = list(dict.fromkeys(cols_orig_lev + cols_orig_san))
                 
                 for c_nome in ['CONTA CONTRATO', 'INSTALACAO']:
                     if c_nome in df_tasks.columns:
@@ -1056,32 +1075,72 @@ def view_roteirizador():
 
         st.markdown("---")
         
+        has_levantamento = 'LEVANTAMENTO' in df_tasks['_ORIGEM_BASE'].values
+        has_saneamento = 'SANEAMENTO' in df_tasks['_ORIGEM_BASE'].values
+        
+        df_list = []
+        tipos_prioritarios_selecionados = []
+        
+        if has_levantamento:
+            with st.expander("🛠️ 4A. Filtros Iniciais - Base LEVANTAMENTO", expanded=True):
+                df_lev = df_tasks[df_tasks['_ORIGEM_BASE'] == 'LEVANTAMENTO'].copy()
+                c_filt1, c_filt2, c_filt3 = st.columns(3)
+                
+                if 'STATUS LIST' in df_lev.columns:
+                    df_lev['STATUS_LIMPO'] = df_lev['STATUS LIST'].astype(str).str.strip().str.upper()
+                    status_unicos = sorted(df_lev['STATUS_LIMPO'].unique().tolist())
+                    padroes_ativos = [s for s in status_unicos if s in STATUS_PADRAO]
+                    status_selecionados = c_filt1.multiselect("📌 Filtrar Status de Início:", options=status_unicos, default=padroes_ativos)
+                    if not status_selecionados: st.warning("Selecione um status."); return
+                    df_lev = df_lev[df_lev['STATUS_LIMPO'].isin(status_selecionados)].drop(columns=['STATUS_LIMPO'])
+
+                if 'TIPO NOTA' in df_lev.columns:
+                    tipos_nota_unicos = sorted(df_lev['TIPO NOTA'].astype(str).dropna().unique().tolist())
+                    tipos_selecionados = c_filt2.multiselect("🏷️ Filtrar TIPO DE NOTA (Todas as Obras):", tipos_nota_unicos, default=tipos_nota_unicos)
+                    if not tipos_selecionados: st.warning("Selecione um Tipo de Nota."); return
+                    df_lev = df_lev[df_lev['TIPO NOTA'].astype(str).isin(tipos_selecionados)]
+                    
+                    padroes_prio = [t for t in tipos_selecionados if t in TIPOS_PRIORITARIOS]
+                    tipos_prioritarios_selecionados = c_filt3.multiselect("🚨 Definir Obras PRIORITÁRIAS:", tipos_selecionados, default=padroes_prio)
+
+                if 'STATUS SAP' in df_lev.columns: df_lev = df_lev[~df_lev['STATUS SAP'].astype(str).str.strip().str.upper().isin(['CANC', 'FINL'])]
+                if 'TIPO NOTA' in df_lev.columns: df_lev['PRIORIDADE'] = df_lev['TIPO NOTA'].apply(lambda x: 'Sim' if str(x).strip().upper() in tipos_prioritarios_selecionados else 'Não')
+                else: df_lev['PRIORIDADE'] = 'Não'
+
+                df_list.append(df_lev)
+                
+        if has_saneamento:
+            with st.expander("🛠️ 4B. Filtros Iniciais - Base SANEAMENTO", expanded=True):
+                df_san = df_tasks[df_tasks['_ORIGEM_BASE'] == 'SANEAMENTO'].copy()
+                c_filt1, c_filt2 = st.columns(2)
+                
+                col_eq = 'CODIGO EQUIPE' if 'CODIGO EQUIPE' in df_san.columns else ('AG - CODIGO EQUIPE' if 'AG - CODIGO EQUIPE' in df_san.columns else None)
+                if col_eq:
+                    df_san['EQ_STR'] = df_san[col_eq].astype(str).str.strip().str.upper()
+                    equipes_unicas = sorted(df_san['EQ_STR'].unique().tolist())
+                    equipes_default = [e for e in equipes_unicas if not str(e).startswith('U')]
+                    equipes_selecionadas = c_filt1.multiselect("👷 Filtrar CÓDIGO EQUIPE:", options=equipes_unicas, default=equipes_default)
+                    if not equipes_selecionadas: st.warning("Selecione uma equipe de Saneamento."); return
+                    df_san = df_san[df_san['EQ_STR'].isin(equipes_selecionadas)].drop(columns=['EQ_STR'])
+
+                col_area = 'CLASSIFICACAO AREA' if 'CLASSIFICACAO AREA' in df_san.columns else None
+                if col_area:
+                    areas_unicas = sorted(df_san[col_area].astype(str).str.strip().str.upper().unique().tolist())
+                    areas_selecionadas = c_filt2.multiselect("🗺️ Filtrar CLASSIFICAÇÃO ÁREA:", options=areas_unicas, default=areas_unicas)
+                    if not areas_selecionadas: st.warning("Selecione uma classificação de área."); return
+                    df_san = df_san[df_san[col_area].astype(str).str.strip().str.upper().isin(areas_selecionadas)]
+
+                df_san['PRIORIDADE'] = 'Não'
+                df_list.append(df_san)
+
+        if not df_list: return
+        df_tasks = pd.concat(df_list, ignore_index=True)
+
         if 'LATITUDE' not in df_tasks.columns: df_tasks['LATITUDE'] = np.nan
         if 'LONGITUDE' not in df_tasks.columns: df_tasks['LONGITUDE'] = np.nan
 
         df_tasks['LATITUDE'] = pd.to_numeric(df_tasks['LATITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
         df_tasks['LONGITUDE'] = pd.to_numeric(df_tasks['LONGITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
-
-        tipos_prioritarios_selecionados = []
-        with st.expander("🛠️ 4. Configuração de Filtros Iniciais", expanded=True):
-            c_filt1, c_filt2, c_filt3 = st.columns(3)
-            
-            if 'STATUS LIST' in df_tasks.columns:
-                df_tasks['STATUS_LIMPO'] = df_tasks['STATUS LIST'].astype(str).str.strip().str.upper()
-                status_unicos = sorted(df_tasks['STATUS_LIMPO'].unique().tolist())
-                padroes_ativos = [s for s in status_unicos if s in STATUS_PADRAO]
-                status_selecionados = c_filt1.multiselect("📌 Filtrar Status de Início:", options=status_unicos, default=padroes_ativos)
-                if not status_selecionados: st.warning("Selecione um status."); return
-                df_tasks = df_tasks[df_tasks['STATUS_LIMPO'].isin(status_selecionados)].drop(columns=['STATUS_LIMPO'])
-
-            if 'TIPO NOTA' in df_tasks.columns:
-                tipos_nota_unicos = sorted(df_tasks['TIPO NOTA'].astype(str).dropna().unique().tolist())
-                tipos_selecionados = c_filt2.multiselect("🏷️ Filtrar TIPO DE NOTA (Todas as Obras):", tipos_nota_unicos, default=tipos_nota_unicos)
-                if not tipos_selecionados: st.warning("Selecione um Tipo de Nota."); return
-                df_tasks = df_tasks[df_tasks['TIPO NOTA'].astype(str).isin(tipos_selecionados)]
-                
-                padroes_prio = [t for t in tipos_selecionados if t in TIPOS_PRIORITARIOS]
-                tipos_prioritarios_selecionados = c_filt3.multiselect("🚨 Definir Obras PRIORITÁRIAS:", tipos_selecionados, default=padroes_prio)
 
         erros_coords_mask = df_tasks['LATITUDE'].isna() | df_tasks['LONGITUDE'].isna() | (df_tasks['LATITUDE'] == 0.0) | (df_tasks['LONGITUDE'] == 0.0)
         qtd_erros_iniciais = erros_coords_mask.sum()
@@ -1131,10 +1190,6 @@ def view_roteirizador():
                 erros_nome += df_tasks[col_nome].isna().sum()
                 df_tasks = df_tasks.dropna(subset=[col_nome])
                 df_tasks = df_tasks[df_tasks[col_nome].astype(str).str.strip() != '']
-                
-        if 'STATUS SAP' in df_tasks.columns: df_tasks = df_tasks[~df_tasks['STATUS SAP'].astype(str).str.strip().str.upper().isin(['CANC', 'FINL'])]
-        if 'TIPO NOTA' in df_tasks.columns: df_tasks['PRIORIDADE'] = df_tasks['TIPO NOTA'].apply(lambda x: 'Sim' if str(x).strip().upper() in tipos_prioritarios_selecionados else 'Não')
-        else: df_tasks['PRIORIDADE'] = 'Não'
 
         df_tasks, qtd_condensada = fundir_super_pontos(df_tasks, raio_metros=5)
         if qtd_condensada > 0:
@@ -1277,15 +1332,23 @@ def view_roteirizador():
         # Menu de exportação final
         with st.expander("🛠️ 5. Configuração de Saída", expanded=True):
             todas_cols = df_tasks_alocadas.columns.tolist()
-            cols_desejadas = ['PROTOCOLO', 'CONTA CONTRATO', 'INSTALACAO', 'NOME', 'ENDEREÇO', 'MUNICIPIO', 'LATITUDE', 'LONGITUDE', 'TIPO NOTA']
+            
+            if has_saneamento and not has_levantamento:
+                cols_desejadas = ['NOTA', 'CONTA CONTRATO', 'STATUS', 'STATUS CLIENTE', 'NOME', 'TIPO DEMANDA', 'MUNICIPIO', 'ENDEREÇO', 'BAIRRO', 'PONTO REFERÊNCIA', 'COMPLEMENTO', 'LATITUDE PROJETO', 'LONGITUDE PROJETO', 'TEL FIXO', 'TEL MÓVEL']
+            elif has_levantamento and not has_saneamento:
+                cols_desejadas = ['PROTOCOLO', 'CONTA CONTRATO', 'INSTALACAO', 'NOME', 'ENDEREÇO', 'MUNICIPIO', 'LATITUDE', 'LONGITUDE', 'TIPO NOTA']
+            else:
+                cols_desejadas = ['PROTOCOLO', 'NOTA', 'CONTA CONTRATO', 'NOME', 'ENDEREÇO', 'MUNICIPIO', 'LATITUDE', 'LONGITUDE', 'TIPO NOTA', 'STATUS']
+
             cols_padrao = [c for c in normalize_cols(cols_desejadas) if c in todas_cols]
             colunas_exibir = st.multiselect("Colunas Visíveis nos Cartões (KML/Mapa)", todas_cols, default=cols_padrao)
             st.info("⚡ **Deduplicação Ativa:** Obras num raio de 5 metros foram transformadas em Super Pontos para otimização.")
-            col_prioridade = "TIPO NOTA"
+            
+            if has_levantamento: col_prioridade = "TIPO NOTA"
+            else: col_prioridade = "Nenhuma"
 
         if st.button("🚀 Iniciar Motor de Roteirização (OR-Tools)", type="primary", use_container_width=True):
             if df_tasks_alocadas.empty: st.error("Selecione equipes válidas."); return
-            if 'TIPO NOTA' in df_tasks_alocadas.columns and 'TIPO NOTA' not in colunas_exibir: colunas_exibir.append('TIPO NOTA')
 
             st.session_state.tarefas_alocadas_inicialmente = len(df_tasks_alocadas)
             st.session_state.bases_records = bases_records
