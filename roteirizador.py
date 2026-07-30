@@ -392,7 +392,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
         if '_ORIGINAL_ROWS' in row and isinstance(row['_ORIGINAL_ROWS'], list):
             for orig in row['_ORIGINAL_ROWS']:
                 new_row = orig.copy()
-                for vrp_col in ['ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'HORA_INICIO', 'HORA_FIM', 'SUPER_PONTO', 'BASE_ATRIBUIDA', 'PRIORIDADE']:
+                for vrp_col in ['NOME_DIA', 'ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'HORA_INICIO', 'HORA_FIM', 'SUPER_PONTO', 'BASE_ATRIBUIDA', 'PRIORIDADE']:
                     if vrp_col in row:
                         new_row[vrp_col] = row[vrp_col]
                 unpacked_rows.append(new_row)
@@ -433,7 +433,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
             elif any(x in col_name_upper for x in ['PROTOCOLO', 'MUNICIPIO', 'BASE', 'LOCALIDADE']): ws.column_dimensions[col_letter].width = 25.0
             else: ws.column_dimensions[col_letter].width = 18.0
                 
-            if col_name_upper in ['ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE', 'HORA_INICIO', 'HORA_FIM']:
+            if col_name_upper in ['NOME_DIA', 'ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE', 'HORA_INICIO', 'HORA_FIM']:
                 col_types[col_idx] = center_align
             else:
                 col_types[col_idx] = left_align
@@ -527,7 +527,10 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
 
             for dia in df_semana['DIA'].unique():
                 df_dia = df_semana[df_semana['DIA'] == dia].copy().sort_values(by='ORDEM')
-                kml_lines.append(f'      <Folder>\n        <name>Dia {dia}</name>')
+                
+                nome_dia_kml = df_dia.iloc[0].get('NOME_DIA', f"Dia {dia}") if not df_dia.empty else f"Dia {dia}"
+                
+                kml_lines.append(f'      <Folder>\n        <name>{nome_dia_kml}</name>')
 
                 coords_linha_kml = []
                 
@@ -548,7 +551,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     
                     extra_rows_list = []
                     for c in cols_exibir:
-                        if c.upper() != 'PROTOCOLO':
+                        if c.upper() != 'PROTOCOLO' and c.upper() != 'NOME_DIA':
                             val_html = formata_campo_html(r.get(c, ''))
                             extra_rows_list.append(f"<tr><td style='padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:4px 8px; color:#222; border-bottom:1px solid #eee;'>{val_html}</td></tr>")
                     extra_rows = "".join(extra_rows_list)
@@ -561,7 +564,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         <div style="padding:10px; background:#fafafa; font-size:13px;">
                             <table style="width:100%; border-collapse:collapse; text-align:left;">
                                 <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{prot_html}</td></tr>
-                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Ordem:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('ORDEM', 0)} (Dia {r.get('DIA', 0)})</td></tr>
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Ordem:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
                                 <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Horário:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
                                 <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Ant.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
                                 <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Próx.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{dist_prox} KM</td></tr>
@@ -655,8 +658,19 @@ def view_roteirizador():
             
         with st.expander("⚙️ Esforço e Limites Diários", expanded=True):
             tipo_periodo = st.radio("Agrupamento de percurso:", ["Dia", "Semana"], horizontal=True, disabled=is_locked)
+            dias_semana_selecionados = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"]
+            
             if tipo_periodo == "Semana":
-                st.caption("ℹ️ Na visão por Semana, o sistema agrupará 6 dias úteis (Seg-Sáb) em cada aba.")
+                dias_semana_selecionados = st.multiselect(
+                    "Dias úteis na semana:",
+                    ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"],
+                    default=["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"],
+                    disabled=is_locked
+                )
+                if not dias_semana_selecionados:
+                    st.warning("⚠️ Selecione pelo menos 1 dia da semana para o cálculo.")
+                else:
+                    st.caption(f"ℹ️ Cada semana terá **{len(dias_semana_selecionados)} dias** alocados.")
                 
             tem_san = bool(st.session_state.get('san_uploader'))
             modo_limite_opcoes = ["Quantidade Fixa de Obras", "Carga Horária (Tempo Real)", "Saneamento (Forçar Quota / 24h)"]
@@ -828,7 +842,7 @@ def view_roteirizador():
                     
                     extra_rows_list = []
                     for c in colunas_exibir:
-                        if c.upper() != 'PROTOCOLO':
+                        if c.upper() != 'PROTOCOLO' and c.upper() != 'NOME_DIA':
                             val_html = formata_campo_html(r.get(c, ''))
                             extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
                     extra_rows = "".join(extra_rows_list)
@@ -841,7 +855,7 @@ def view_roteirizador():
                         <div style="padding:10px; background:#fafafa; font-size:12px;">
                             <table style="width:100%; border-collapse:collapse;">
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({tipo_periodo} {r.get('PERIODO', 0)})</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
@@ -1247,7 +1261,7 @@ def view_roteirizador():
 
             base_counts = {b['LEVANTADOR']: 0 for b in todas_bases_records}
             
-            dias_multiplier = 6 if tipo_periodo == 'Semana' else 1
+            dias_multiplier = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
             
             if modo_limite == "Quantidade Fixa de Obras":
                 obras_dia_est = obras_por_dia
@@ -1352,6 +1366,9 @@ def view_roteirizador():
 
         if st.button("🚀 Iniciar Motor de Roteirização (OR-Tools)", type="primary", use_container_width=True):
             if df_tasks_alocadas.empty: st.error("Selecione equipes válidas."); return
+            if tipo_periodo == "Semana" and not dias_semana_selecionados:
+                st.error("Selecione os dias da semana na barra lateral antes de continuar.")
+                return
 
             st.session_state.tarefas_alocadas_inicialmente = len(df_tasks_alocadas)
             st.session_state.bases_records = bases_records
@@ -1369,7 +1386,8 @@ def view_roteirizador():
                 'config': {
                     'modo_limite': modo_limite, 'velocidade_media_kmh': velocidade_media_kmh,
                     'tempo_medio_obra': tempo_medio_obra, 'horas_por_dia': horas_por_dia, 'limite_km_diario': limite_km_diario,
-                    'obras_por_dia': obras_por_dia, 'tipo_periodo': tipo_periodo, 'limite_periodos': limite_periodos
+                    'obras_por_dia': obras_por_dia, 'tipo_periodo': tipo_periodo, 'limite_periodos': limite_periodos,
+                    'dias_selecionados': dias_semana_selecionados
                 },
                 'b_names': list(set([b['LEVANTADOR'] for b in bases_records])),
                 'b_idx': 0, 'unvisited': df_tasks_alocadas.copy(), 'routed_data': [],
@@ -1524,7 +1542,7 @@ def view_roteirizador():
                                 'obra': None, 'is_lunch': True, 'is_retorno': False,
                                 'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
                                 'lat_atual': estado['lat'], 'lon_atual': estado['lon'],
-                                'semana': semana_atual, 'dia': dia_absoluto,
+                                'semana': semana_atual, 'dia': dia_absoluto, 'dia_semana_idx': dia_da_semana,
                                 'hora_inicio': lunch_start, 'hora_fim': lunch_end,
                                 'viagem_min': 0.0, 'dist_km': 0.0
                             })
@@ -1555,7 +1573,7 @@ def view_roteirizador():
                                 'obra': None, 'is_lunch': False, 'is_retorno': True,
                                 'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
                                 'lat_atual': base_lat, 'lon_atual': base_lon,
-                                'semana': semana_atual, 'dia': dia_absoluto,
+                                'semana': semana_atual, 'dia': dia_absoluto, 'dia_semana_idx': dia_da_semana,
                                 'hora_inicio': estado['time'], 'hora_fim': ret_fim,
                                 'viagem_min': viagem_ret, 'dist_km': dist_ret
                             })
@@ -1565,7 +1583,7 @@ def view_roteirizador():
                             
                             if cfg['tipo_periodo'] == "Semana":
                                 dia_da_semana += 1
-                                if dia_da_semana > 6:
+                                if dia_da_semana > len(cfg['dias_selecionados']):
                                     semana_atual += 1
                                     dia_da_semana = 1
                                     
@@ -1589,7 +1607,7 @@ def view_roteirizador():
                             'obra': obra, 'is_lunch': False, 'is_retorno': False,
                             'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
                             'lat_atual': obra['LATITUDE'], 'lon_atual': obra['LONGITUDE'],
-                            'semana': semana_atual, 'dia': dia_absoluto,
+                            'semana': semana_atual, 'dia': dia_absoluto, 'dia_semana_idx': dia_da_semana,
                             'hora_inicio': chegada_prevista, 'hora_fim': fim_previsto,
                             'viagem_min': viagem_min, 'dist_km': viagem_km
                         })
@@ -1608,7 +1626,7 @@ def view_roteirizador():
                             'obra': None, 'is_lunch': False, 'is_retorno': True,
                             'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
                             'lat_atual': base_lat, 'lon_atual': base_lon,
-                            'semana': semana_atual, 'dia': dia_absoluto,
+                            'semana': semana_atual, 'dia': dia_absoluto, 'dia_semana_idx': dia_da_semana,
                             'hora_inicio': estado['time'], 'hora_fim': ret_fim,
                             'viagem_min': viagem_ret, 'dist_km': dist_ret
                         })
@@ -1619,12 +1637,14 @@ def view_roteirizador():
                     ordem_global = 1
                     for item, (geom, dur_sec) in zip(rotas_flat, geoms_and_durs):
                         periodo_val = item['semana'] if cfg['tipo_periodo'] == "Semana" else item['dia']
+                        dia_nome_str = cfg['dias_selecionados'][item['dia_semana_idx'] - 1] if cfg['tipo_periodo'] == "Semana" else f"Dia {item['dia']}"
                         
                         if item['is_lunch']:
                             routed_data_final.append({
                                 'PROTOCOLO': 'PAUSA_ALMOCO', 'NOME': '🍔 ALMOÇO DA EQUIPE', 
                                 'LATITUDE': item['lat_atual'], 'LONGITUDE': item['lon_atual'],
                                 'BASE_ATRIBUIDA': b_name, 'ORDEM': ordem_global, 
+                                'NOME_DIA': dia_nome_str,
                                 'SEMANA': item['semana'],
                                 'DIA': item['dia'], 
                                 'PERIODO': periodo_val,
@@ -1640,6 +1660,7 @@ def view_roteirizador():
                                 'PROTOCOLO': 'RETORNO_BASE', 'NOME': 'BASE_RETORNO', 
                                 'LATITUDE': item['lat_atual'], 'LONGITUDE': item['lon_atual'],
                                 'BASE_ATRIBUIDA': b_name, 'ORDEM': ordem_global, 
+                                'NOME_DIA': dia_nome_str,
                                 'SEMANA': item['semana'],
                                 'DIA': item['dia'], 
                                 'PERIODO': periodo_val,
@@ -1653,6 +1674,7 @@ def view_roteirizador():
                         else:
                             obra = item['obra']
                             obra['ORDEM'] = ordem_global
+                            obra['NOME_DIA'] = dia_nome_str
                             obra['SEMANA'] = item['semana']
                             obra['DIA'] = item['dia']
                             obra['PERIODO'] = periodo_val
