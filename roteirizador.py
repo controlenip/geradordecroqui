@@ -671,26 +671,16 @@ def view_roteirizador():
                     st.warning("⚠️ Selecione pelo menos 1 dia da semana para o cálculo.")
                 
             tem_san = bool(st.session_state.get('san_uploader'))
-            modo_limite_opcoes = ["Quantidade Fixa de Obras", "Carga Horária (Tempo Real)", "Saneamento (Forçar Quota / 24h)"]
-            idx_padrao = 2 if tem_san else 0
+            modo_limite_opcoes = ["Quantidade Fixa de Obras", "Saneamento (Forçar Quota / 24h)"]
+            idx_padrao = 1 if tem_san else 0
             
             modo_limite = st.radio("Critério limitador:", modo_limite_opcoes, index=idx_padrao, disabled=is_locked)
-            limite_km_diario = st.slider("Limite de KM por Dia", 0, 500, 500, 5, disabled=is_locked)
             
-            if modo_limite in ["Quantidade Fixa de Obras", "Saneamento (Forçar Quota / 24h)"]:
-                obras_por_dia = st.number_input("Obras Previstas por Dia (Por Equipe)", min_value=1, value=30, step=1, disabled=is_locked)
-                limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
-                
-                tempo_medio_obra = 0.5
-                velocidade_media_kmh = 30.0
-                horas_por_dia = 24.0 if modo_limite == "Saneamento (Forçar Quota / 24h)" else 8.0
-            else:
-                horas_por_dia = st.number_input("Horas por Dia", min_value=1.0, value=8.0, step=0.5, disabled=is_locked)
-                tempo_medio_obra = 1.5
-                velocidade_media_kmh = 30.0
-                limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
-                obras_por_dia = int(horas_por_dia / tempo_medio_obra)
-                if obras_por_dia < 1: obras_por_dia = 1
+            obras_por_dia = st.number_input("Obras Previstas por Dia (Por Equipe)", min_value=1, value=30, step=1, disabled=is_locked)
+            limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
+            
+            tempo_medio_obra = 0.5
+            velocidade_media_kmh = 30.0
 
         with st.expander("💰 Custos e Gestão Financeira", expanded=False):
             custo_combustivel = st.number_input("Custo Combustível (R$/L)", min_value=0.0, value=0.0, step=0.1, disabled=is_locked)
@@ -1211,11 +1201,17 @@ def view_roteirizador():
 
         st.markdown("#### 📊 Raio-X da Base de Dados Carregada")
         tot_obras_aprovadas = sum(len(r.get('_ORIGINAL_ROWS', [1])) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1 for _, r in df_tasks.iterrows())
+        linhas_rejeitadas = total_obras_inicial - tot_obras_aprovadas
         
         st.markdown(f"""
-        <div class="profiling-box">
-            <b>Análise Estrutural:</b> Das {total_obras_inicial} linhas encontradas, o sistema aprovou <b style="color: #0D256C;">{tot_obras_aprovadas} obras reais</b> (compactadas em {len(df_tasks)} paradas físicas no mapa). <br>
-            <i>(Omitidas: {qtd_erros_coords_finais} sem coordenadas resolvíveis | {erros_nome} sem nome de cliente).</i>
+        <div class="profiling-box" style="font-size: 14.5px; line-height: 1.6;">
+            <p style="margin-bottom: 10px;"><b>Entendendo o funil da sua planilha:</b></p>
+            <ul style="margin-bottom: 0;">
+                <li>📥 <b>Total no arquivo original:</b> {total_obras_inicial} linhas.</li>
+                <li>❌ <b>Descartadas (Filtros e Erros):</b> {linhas_rejeitadas} linhas <i>({qtd_erros_coords_finais} sem coordenadas, {erros_nome} sem cliente, e o resto barrado nos filtros de status/área).</i></li>
+                <li>✅ <b>Obras Válidas:</b> Ficaram <b style="color: #0D256C;">{tot_obras_aprovadas} serviços reais</b> para serem executados.</li>
+                <li>📍 <b>Otimização de Rota:</b> O sistema agrupou obras que ficam no mesmo endereço (mesmo prédio ou poste). Portanto, os técnicos precisarão fazer apenas <b style="color: #55B929;">{len(df_tasks)} paradas físicas</b> no mapa para dar conta de todos os {tot_obras_aprovadas} serviços.</li>
+            </ul>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1376,8 +1372,8 @@ def view_roteirizador():
             
             st.session_state.vrp_state = {
                 'config': {
-                    'velocidade_media_kmh': velocidade_media_kmh,
-                    'tempo_medio_obra': tempo_medio_obra,
+                    'velocidade_media_kmh': 30.0,
+                    'tempo_medio_obra': 0.5,
                     'obras_por_dia': obras_por_dia, 'tipo_periodo': tipo_periodo, 'limite_periodos': limite_periodos,
                     'dias_selecionados': dias_semana_selecionados
                 },
