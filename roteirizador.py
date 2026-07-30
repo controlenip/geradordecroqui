@@ -669,8 +669,6 @@ def view_roteirizador():
                 )
                 if not dias_semana_selecionados:
                     st.warning("⚠️ Selecione pelo menos 1 dia da semana para o cálculo.")
-                else:
-                    st.caption(f"ℹ️ Cada semana terá **{len(dias_semana_selecionados)} dias** alocados.")
                 
             tem_san = bool(st.session_state.get('san_uploader'))
             modo_limite_opcoes = ["Quantidade Fixa de Obras", "Carga Horária (Tempo Real)", "Saneamento (Forçar Quota / 24h)"]
@@ -683,13 +681,13 @@ def view_roteirizador():
                 obras_por_dia = st.number_input("Obras Previstas por Dia (Por Equipe)", min_value=1, value=30, step=1, disabled=is_locked)
                 limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
                 
-                tempo_medio_obra = st.number_input("Tempo de execução/obra (Horas)", min_value=0.1, value=0.5, step=0.1, disabled=is_locked, help="Apenas para simular os horários na planilha.")
-                velocidade_media_kmh = st.number_input("Velocidade Média (km/h)", min_value=10.0, value=30.0, step=5.0, disabled=is_locked)
+                tempo_medio_obra = 0.5
+                velocidade_media_kmh = 30.0
                 horas_por_dia = 24.0 if modo_limite == "Saneamento (Forçar Quota / 24h)" else 8.0
             else:
                 horas_por_dia = st.number_input("Horas por Dia", min_value=1.0, value=8.0, step=0.5, disabled=is_locked)
-                tempo_medio_obra = st.number_input("Tempo de execução/obra (Horas)", min_value=0.1, value=1.5, step=0.1, disabled=is_locked)
-                velocidade_media_kmh = st.number_input("Velocidade (km/h)", min_value=10.0, value=30.0, step=5.0, disabled=is_locked)
+                tempo_medio_obra = 1.5
+                velocidade_media_kmh = 30.0
                 limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
                 obras_por_dia = int(horas_por_dia / tempo_medio_obra)
                 if obras_por_dia < 1: obras_por_dia = 1
