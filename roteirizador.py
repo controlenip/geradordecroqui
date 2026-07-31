@@ -137,7 +137,6 @@ def limpar_roteirizador():
     st.session_state.col_prioridade = "TIPO NOTA"
     st.session_state.colunas_originais = []
     st.session_state.show_capacity_modal = False
-    st.session_state.qtd_equipes_ativas = 0
     if 'bytes_zip_xl' in st.session_state: del st.session_state['bytes_zip_xl']
     if 'bytes_zip_kml' in st.session_state: del st.session_state['bytes_zip_kml']
     ler_planilha_cached.clear()
@@ -628,7 +627,6 @@ def view_roteirizador():
     if "col_prioridade" not in st.session_state: st.session_state.col_prioridade = "TIPO NOTA"
     if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
     if "show_capacity_modal" not in st.session_state: st.session_state.show_capacity_modal = False
-    if "qtd_equipes_ativas" not in st.session_state: st.session_state.qtd_equipes_ativas = 0
 
     status_exec = st.session_state.vrp_status
     is_done = st.session_state.roteamento_concluido
@@ -745,26 +743,6 @@ def view_roteirizador():
             
             sidebar_html_placeholder = st.empty()
             
-            if status_exec != "IDLE" or is_done:
-                qtd_eq = st.session_state.get('qtd_equipes_ativas', 0)
-                if not qtd_eq and st.session_state.get('bases_records'):
-                    qtd_eq = len(st.session_state.bases_records)
-                    
-                dias_mult = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
-                cap_total_estimada_live = obras_por_dia * dias_mult * limite_periodos * (qtd_eq if qtd_eq > 0 else 1)
-                
-                sidebar_html_placeholder.markdown(f'''
-                <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block; margin-top: 10px;">Capacidade Máxima Obras:</label>
-                <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
-                    {cap_total_estimada_live} Obras totais
-                </div>
-                
-                <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Equipes na Planilha:</label>
-                <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 5px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
-                    {qtd_eq} Equipes
-                </div>
-                ''', unsafe_allow_html=True)
-            
         with st.expander("📡 Conexão de Rede (Avançado)", expanded=False):
             url_osrm_base = st.text_input("Endpoint OSRM ⚠️ (NÃO APAGUE OU EDITE):", value="http://router.project-osrm.org", disabled=is_locked)
             st.caption("Este link conecta o sistema à malha viária real de ruas do mundo.")
@@ -811,6 +789,9 @@ def view_roteirizador():
             origens = df_routed['_ORIGEM_BASE'].unique()
             if 'SANEAMENTO' in origens and 'LEVANTAMENTO' not in origens:
                 is_saneamento_puro = True
+
+        if 'tot_obras_nao_alocadas' in st.session_state and st.session_state.tot_obras_nao_alocadas > 0:
+            st.warning(f"⚠️ **OBRAS SEM COBERTURA:** {st.session_state.tot_obras_nao_alocadas} obras não encontraram nenhuma equipe geograficamente compatível (verifique a regra de municípios).")
 
         c_m1, c_m2, c_m3, c_m4 = st.columns(4)
         c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #0D256C;"><div class="metric-icon" style="background: rgba(13, 37, 108, 0.12);">🎯</div><div class="metric-content"><div class="metric-title">TOTAL DE OBRAS ROTEIRIZADAS</div><div class="metric-value">{tot_obras_reais} <span style="font-size:12px;color:#888;">(Em {tot_paradas} Pontos)</span></div></div></div>', unsafe_allow_html=True)
@@ -1093,24 +1074,17 @@ def view_roteirizador():
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
-            # === CÁLCULO DINÂMICO DE EQUIPES E PAINEL LATERAL ===
-            qtd_eq_atual_live = len(levs_selecionados) + len(levs_temp_selecionados)
-            st.session_state.qtd_equipes_ativas = qtd_eq_atual_live
-            
-            dias_mult = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
-            cap_total_estimada_live = obras_por_dia * dias_mult * limite_periodos * (qtd_eq_atual_live if qtd_eq_atual_live > 0 else 1)
-            
-            sidebar_html_placeholder.markdown(f'''
-            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block; margin-top: 10px;">Capacidade Máxima Obras:</label>
-            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
-                {cap_total_estimada_live} Obras totais
-            </div>
-            
-            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Equipes na Planilha:</label>
-            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 5px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
-                {qtd_eq_atual_live} Equipes
-            </div>
-            ''', unsafe_allow_html=True)
+            # === ATUALIZAÇÃO DA PONTE FANTASMA (SIDEBAR) EM TEMPO REAL ===
+            if status_exec == "IDLE":
+                dias_mult_live = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
+                cap_por_eq_live = obras_por_dia * dias_mult_live * limite_periodos
+                
+                sidebar_html_placeholder.markdown(f'''
+                <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block; margin-top: 10px;">Capacidade da Rota (Por Equipe):</label>
+                <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
+                    {cap_por_eq_live} Obras
+                </div>
+                ''', unsafe_allow_html=True)
 
             if not task_files and not saneamento_files: 
                 st.info("Aguardando upload de obras na Base Levantamento ou Base Saneamento.")
