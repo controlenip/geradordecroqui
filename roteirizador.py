@@ -484,7 +484,7 @@ def gerar_excel_resumo_bytes(df):
             for row_idx in range(2, len(df) + 2): ws.cell(row=row_idx, column=col_idx).alignment = col_align
     return buf_xl.getvalue()
 
-def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_todas_bases=None):
+def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_todas_bases=None, tipo_periodo="Dia"):
     if lista_todas_bases is None: lista_todas_bases = df_rota['BASE_ATRIBUIDA'].unique().tolist()
         
     kml_lines = [f'''<?xml version="1.0" encoding="UTF-8"?>
@@ -513,79 +513,140 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
         kml_lines.append(f'  <Folder>\n    <name>Levantador: {html.escape(str(base_nome))}</name>')
         kml_lines.append(f'    <Placemark><name>BASE: {html.escape(str(res_nome))}</name><styleUrl>#icon-green</styleUrl><Point><coordinates>{b_lon},{b_lat},0</coordinates></Point></Placemark>')
 
-        for dia in df_base['DIA'].unique():
-            df_dia = df_base[df_base['DIA'] == dia].copy().sort_values(by='ORDEM')
-            nome_dia_kml = df_dia.iloc[0].get('NOME_DIA', f"Dia {dia}") if not df_dia.empty else f"Dia {dia}"
-            
-            kml_lines.append(f'      <Folder>\n        <name>{nome_dia_kml}</name>')
-            coords_linha_kml = []
-            
-            for r in df_dia.to_dict('records'):
-                lon, lat = str(r.get('LONGITUDE')).replace(',','.'), str(r.get('LATITUDE')).replace(',','.')
+        if tipo_periodo == "Semana":
+            for semana in df_base['SEMANA'].unique():
+                df_semana = df_base[df_base['SEMANA'] == semana]
+                kml_lines.append(f'    <Folder>\n      <name>Semana {semana}</name>')
+                for dia in df_semana['DIA'].unique():
+                    df_dia = df_semana[df_semana['DIA'] == dia].copy().sort_values(by='ORDEM')
+                    nome_dia_kml = df_dia.iloc[0].get('NOME_DIA', f"Dia {dia}") if not df_dia.empty else f"Dia {dia}"
+                    kml_lines.append(f'      <Folder>\n        <name>{nome_dia_kml}</name>')
+                    coords_linha_kml = []
+                    
+                    for r in df_dia.to_dict('records'):
+                        lon, lat = str(r.get('LONGITUDE')).replace(',','.'), str(r.get('LATITUDE')).replace(',','.')
+                        if r.get('PROTOCOLO') in ['RETORNO_BASE', 'PAUSA_ALMOCO']:
+                            geometria = r.get('ROTA_GEOMETRIA')
+                            if isinstance(geometria, list):
+                                coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
+                            else:
+                                coords_linha_kml.append(f"          {lon},{lat},0")
+                            continue
+
+                        is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
+                        cor_icone = 'orange' if is_super else ('red' if r.get('PRIORIDADE') == "Sim" else 'blue')
+                        
+                        if is_super:
+                            qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
+                            pop_header_bg, pop_header_color = "#FFD700", "#000000"
+                            pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
+                            nome_ponto = f"[PRIORIDADE] [{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}" if r.get('PRIORIDADE') == "Sim" else f"[{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}"
+                            style_url = "#icon-yellow"
+                        else:
+                            pop_header_bg, pop_header_color = ("#d9534f", "#ffffff") if r.get('PRIORIDADE') == "Sim" else ("#0D256C", "#ffffff")
+                            pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
+                            prot_str = str(r.get('PROTOCOLO', 'N/A'))
+                            nome_obra = str(r.get('NOME', ''))
+                            if nome_obra.lower() == 'nan': nome_obra = ''
+                            separador = " - " if nome_obra else ""
+                            tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
+                            nome_ponto = f"{tag_prio}[{r.get('ORDEM', 0)}] Doc: {html.escape(prot_str)}{separador}{html.escape(nome_obra)}"
+                            style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
+                        
+                        dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
+                        extra_rows_list = []
+                        for c in cols_exibir:
+                            if c.upper() not in ['PROTOCOLO', 'NOME_DIA', 'SEMANA']:
+                                val_html = formata_campo_html(r.get(c, ''))
+                                extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
+                        extra_rows = "".join(extra_rows_list)
+                        prot_html = formata_campo_html(r.get('PROTOCOLO', 'N/A'))
+
+                        popup_html = f"""
+                        <div style="font-family:sans-serif; width:280px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
+                            <div style="background:{pop_header_bg}; color:{pop_header_color}; padding:8px 10px; font-size:13px; font-weight:bold;">{pop_prio_txt}</div>
+                            <div style="padding:10px; background:#fafafa; font-size:12px;">
+                                <table style="width:100%; border-collapse:collapse;">
+                                    <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
+                                    <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
+                                    <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                                    <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
+                                    {extra_rows}
+                                </table>
+                            </div>
+                        </div>"""
+                        kml_lines.append(f'        <Placemark><name>{nome_ponto}</name><description><![CDATA[{popup_html}]]></description><styleUrl>{style_url}</styleUrl><Point><coordinates>{lon},{lat},0</coordinates></Point></Placemark>')
+                        
+                    kml_str_coords = "\n".join(coords_linha_kml)
+                    kml_lines.append(f'        <Placemark><name>Traçado Rota</name><styleUrl>#rota-centro-{nome_limpo_base}</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{kml_str_coords}\n            </coordinates></LineString></Placemark>\n      </Folder>')
+                kml_lines.append('    </Folder>')
+        else:
+            for dia in df_base['DIA'].unique():
+                df_dia = df_base[df_base['DIA'] == dia].copy().sort_values(by='ORDEM')
+                nome_dia_kml = df_dia.iloc[0].get('NOME_DIA', f"Dia {dia}") if not df_dia.empty else f"Dia {dia}"
                 
-                if r.get('PROTOCOLO') in ['RETORNO_BASE', 'PAUSA_ALMOCO']:
-                    geometria = r.get('ROTA_GEOMETRIA')
-                    if isinstance(geometria, list):
-                        coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
+                kml_lines.append(f'      <Folder>\n        <name>{nome_dia_kml}</name>')
+                coords_linha_kml = []
+                
+                for r in df_dia.to_dict('records'):
+                    lon, lat = str(r.get('LONGITUDE')).replace(',','.'), str(r.get('LATITUDE')).replace(',','.')
+                    if r.get('PROTOCOLO') in ['RETORNO_BASE', 'PAUSA_ALMOCO']:
+                        geometria = r.get('ROTA_GEOMETRIA')
+                        if isinstance(geometria, list):
+                            coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
+                        else:
+                            coords_linha_kml.append(f"          {lon},{lat},0")
+                        continue
+
+                    is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
+                    cor_icone = 'orange' if is_super else ('red' if r.get('PRIORIDADE') == "Sim" else 'blue')
+                    
+                    if is_super:
+                        qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
+                        pop_header_bg, pop_header_color = "#FFD700", "#000000"
+                        pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
+                        nome_ponto = f"[PRIORIDADE] [{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}" if r.get('PRIORIDADE') == "Sim" else f"[{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}"
+                        style_url = "#icon-yellow"
                     else:
-                        coords_linha_kml.append(f"          {lon},{lat},0")
-                    continue
+                        pop_header_bg, pop_header_color = ("#d9534f", "#ffffff") if r.get('PRIORIDADE') == "Sim" else ("#0D256C", "#ffffff")
+                        pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
+                        prot_str = str(r.get('PROTOCOLO', 'N/A'))
+                        nome_obra = str(r.get('NOME', ''))
+                        if nome_obra.lower() == 'nan': nome_obra = ''
+                        separador = " - " if nome_obra else ""
+                        tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
+                        nome_ponto = f"{tag_prio}[{r.get('ORDEM', 0)}] Doc: {html.escape(prot_str)}{separador}{html.escape(nome_obra)}"
+                        style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
+                    
+                    dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
+                    extra_rows_list = []
+                    for c in cols_exibir:
+                        if c.upper() not in ['PROTOCOLO', 'NOME_DIA', 'SEMANA']:
+                            val_html = formata_campo_html(r.get(c, ''))
+                            extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
+                    extra_rows = "".join(extra_rows_list)
+                    prot_html = formata_campo_html(r.get('PROTOCOLO', 'N/A'))
 
-                is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
-                if is_super:
-                    cor_icone = 'orange'
-                else:
-                    cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
-                
-                if is_super:
-                    qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
-                    pop_header_bg = "#FFD700"
-                    pop_header_color = "#000000"
-                    pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
-                    nome_ponto = f"[PRIORIDADE] [{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}" if r.get('PRIORIDADE') == "Sim" else f"[{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}"
-                    style_url = "#icon-yellow"
-                else:
-                    pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
-                    pop_header_color = "#ffffff"
-                    pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
-                    prot_str = str(r.get('PROTOCOLO', 'N/A'))
-                    nome_obra = str(r.get('NOME', ''))
-                    if nome_obra.lower() == 'nan': nome_obra = ''
-                    separador = " - " if nome_obra else ""
-                    tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
-                    nome_ponto = f"{tag_prio}[{r.get('ORDEM', 0)}] Doc: {html.escape(prot_str)}{separador}{html.escape(nome_obra)}"
-                    style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
-                
-                dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
-                
-                extra_rows_list = []
-                for c in cols_exibir:
-                    if c.upper() != 'PROTOCOLO' and c.upper() != 'NOME_DIA':
-                        val_html = formata_campo_html(r.get(c, ''))
-                        extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
-                extra_rows = "".join(extra_rows_list)
+                    popup_html = f"""
+                    <div style="font-family:sans-serif; width:280px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
+                        <div style="background:{pop_header_bg}; color:{pop_header_color}; padding:8px 10px; font-size:13px; font-weight:bold;">{pop_prio_txt}</div>
+                        <div style="padding:10px; background:#fafafa; font-size:12px;">
+                            <table style="width:100%; border-collapse:collapse;">
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
+                                {extra_rows}
+                            </table>
+                        </div>
+                    </div>"""
+                    kml_lines.append(f'        <Placemark><name>{nome_ponto}</name><description><![CDATA[{popup_html}]]></description><styleUrl>{style_url}</styleUrl><Point><coordinates>{lon},{lat},0</coordinates></Point></Placemark>')
+                    
+                kml_str_coords = "\n".join(coords_linha_kml)
+                kml_lines.append(f'        <Placemark><name>Traçado Rota</name><styleUrl>#rota-centro-{nome_limpo_base}</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{kml_str_coords}\n            </coordinates></LineString></Placemark>\n      </Folder>')
 
-                prot_html = formata_campo_html(r.get('PROTOCOLO', 'N/A'))
-
-                popup_html = f"""
-                <div style="font-family:sans-serif; width:280px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
-                    <div style="background:{pop_header_bg}; color:{pop_header_color}; padding:8px 10px; font-size:13px; font-weight:bold;">{pop_prio_txt}</div>
-                    <div style="padding:10px; background:#fafafa; font-size:12px;">
-                        <table style="width:100%; border-collapse:collapse;">
-                            <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
-                            <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
-                            <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
-                            <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
-                            <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
-                            {extra_rows}
-                        </table>
-                    </div>
-                </div>"""
-                kml_lines.append(f'        <Placemark><name>{nome_ponto}</name><description><![CDATA[{popup_html}]]></description><styleUrl>{style_url}</styleUrl><Point><coordinates>{lon},{lat},0</coordinates></Point></Placemark>')
-                
-            kml_str_coords = "\n".join(coords_linha_kml)
-            kml_lines.append(f'        <Placemark><name>Traçado Rota</name><styleUrl>#rota-centro-{nome_limpo_base}</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{kml_str_coords}\n            </coordinates></LineString></Placemark>\n      </Folder>')
-    kml_lines.append('  </Folder>\n</Document>\n</kml>')
+        kml_lines.append('  </Folder>')
+    kml_lines.append('</Document>\n</kml>')
     return "\n".join(kml_lines)
 
 # ==========================================
@@ -666,10 +727,15 @@ def view_roteirizador():
         
         obras_dia_meta = cfg_atual.get('obras_por_dia', 30)
         limite_periodos_meta = cfg_atual.get('limite_periodos', 5)
+        tipo_periodo_meta = cfg_atual.get('tipo_periodo', 'Dia')
         
-        meta_exata_por_equipe = obras_dia_meta * limite_periodos_meta
+        dias_multiplicador = 6 if tipo_periodo_meta == "Semana" else 1
+        
+        meta_exata_por_equipe = obras_dia_meta * dias_multiplicador * limite_periodos_meta
         tot_equipes_cadastradas = len(st.session_state.bases_records)
         meta_global_exata = meta_exata_por_equipe * tot_equipes_cadastradas
+        
+        nome_periodo_label = "Semanas" if tipo_periodo_meta == "Semana" else "Dias"
         
         obras_por_equipe = {b['LEVANTADOR']: 0 for b in st.session_state.bases_records}
             
@@ -683,14 +749,14 @@ def view_roteirizador():
         
         st.markdown(f'''
         <div style="background-color: #f8fafc; color: #0f172a; padding: 15px; border-left: 5px solid #3b82f6; margin-bottom: 20px; border-radius: 4px; border: 1px solid #e2e8f0;">
-            <h4 style="margin-top: 0; color: #1e3a8a;">📊 Auditoria Matemática: {obras_dia_meta} obras/dia × {limite_periodos_meta} dias × {tot_equipes_cadastradas} levantadores = {meta_global_exata} obras projetadas</h4>
+            <h4 style="margin-top: 0; color: #1e3a8a;">📊 Auditoria Matemática: {obras_dia_meta} obras/dia × {limite_periodos_meta} {nome_periodo_label} × {tot_equipes_cadastradas} equipes = {meta_global_exata} obras projetadas</h4>
             <p style="margin-bottom: 10px;">O sistema foi configurado para ignorar barreiras de tempo/distância e buscar a cota exata. <b>Total Final Roteirizado: {tot_obras_reais} obras.</b></p>
         ''', unsafe_allow_html=True)
         
         if equipes_abaixo_meta:
             motivos = []
             if tot_obras_reais < meta_global_exata:
-                motivos.append(f"<b>Falta de Demanda ou Gargalo Geográfico:</b> A matemática projetou {meta_global_exata} obras no total. No entanto, o sistema só conseguiu alocar {tot_obras_reais}. As {st.session_state.get('tot_obras_nao_alocadas', 0)} obras restantes (se houver) não puderam ser roteirizadas porque acabaram as obras na planilha ou elas estão em cidades bloqueadas pelas regras de distribuição territorial.")
+                motivos.append(f"<b>Falta de Demanda ou Gargalo Geográfico:</b> A matemática projetou {meta_global_exata} obras no total. No entanto, o sistema só conseguiu alocar {tot_obras_reais}. As {st.session_state.get('tot_obras_nao_alocadas', 0)} obras restantes (se houver) não puderam ser roteirizadas porque acabaram as obras na fila ou elas estão em cidades bloqueadas pelas regras de distribuição territorial.")
                 
             detalhes_html = "".join([f"<li style='margin-bottom: 4px;'><b>{eq}</b>: Roteirizou {qtd} obras (Meta Exata: {meta_exata_por_equipe}).</li>" for eq, qtd in equipes_abaixo_meta.items()])
             
@@ -758,7 +824,7 @@ def view_roteirizador():
                     
                     extra_rows_list = []
                     for c in colunas_exibir:
-                        if c.upper() != 'PROTOCOLO' and c.upper() != 'NOME_DIA':
+                        if c.upper() not in ['PROTOCOLO', 'NOME_DIA', 'SEMANA']:
                             val_html = formata_campo_html(r.get(c, ''))
                             extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
                     extra_rows = "".join(extra_rows_list)
@@ -771,8 +837,7 @@ def view_roteirizador():
                         <div style="padding:10px; background:#fafafa; font-size:12px;">
                             <table style="width:100%; border-collapse:collapse;">
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} (Dia {r.get('PERIODO', 0)})</td></tr>
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', 'Dia')})</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
                                 {extra_rows}
@@ -873,9 +938,17 @@ def view_roteirizador():
                     unsafe_allow_html=True
                 )
             
-            st.markdown("### ⚙️ Metas e Cotas")
-            st.session_state.input_obras_por_dia = st.number_input("Cota Diária (Obras/Dia por equipe):", min_value=1, value=st.session_state.input_obras_por_dia)
-            limite_periodos = st.number_input("Quantidade de Dias Previstos:", min_value=1, value=5)
+            with st.expander("⚙️ Esforço e Limites de Quantidade", expanded=True):
+                tipo_periodo = st.radio("Agrupamento de percurso:", ["Dia", "Semana"], horizontal=True)
+                if tipo_periodo == "Semana":
+                    st.caption("ℹ️ Na visão por Semana, o sistema agrupará 6 dias úteis (Seg-Sáb) em cada aba.")
+                    
+                st.session_state.input_obras_por_dia = st.number_input("Cota Diária (Obras/Dia por equipe):", min_value=1, value=st.session_state.input_obras_por_dia)
+                limite_periodos = st.number_input(f"Quantidade total de {tipo_periodo}s:", min_value=1, value=5)
+            
+            with st.expander("📡 Conexão de Rede (Avançado)", expanded=False):
+                url_osrm_base = st.text_input("Endpoint OSRM ⚠️ (NÃO APAGUE OU EDITE):", value="http://router.project-osrm.org")
+                st.caption("Este link conecta o sistema à malha viária real de ruas do mundo.")
             
             # Placeholder visual onde a matemática será exibida ao vivo
             sidebar_html_placeholder = st.empty()
@@ -1025,7 +1098,8 @@ def view_roteirizador():
             qtd_eq_atual_live = qtd_eq_princ + qtd_eq_temp
             st.session_state.qtd_equipes_ativas = qtd_eq_atual_live
             
-            cap_por_eq_live = st.session_state.input_obras_por_dia * limite_periodos
+            dias_multiplier = 6 if tipo_periodo == 'Semana' else 1
+            cap_por_eq_live = st.session_state.input_obras_por_dia * dias_multiplier * limite_periodos
             cap_total_estimada_live = cap_por_eq_live * (qtd_eq_atual_live if qtd_eq_atual_live > 0 else 1)
             
             sidebar_html_placeholder.markdown(f'''
@@ -1266,7 +1340,7 @@ def view_roteirizador():
 
             base_counts = {b['LEVANTADOR']: 0 for b in todas_bases_records}
             
-            max_capacity = st.session_state.input_obras_por_dia * limite_periodos
+            max_capacity = st.session_state.input_obras_por_dia * dias_multiplier * limite_periodos
 
             def assign_load_balanced(df_sub, allowed_bases, is_prio=False):
                 if df_sub.empty or not allowed_bases: return pd.DataFrame(), df_sub.copy()
@@ -1389,7 +1463,7 @@ def view_roteirizador():
         if st.button("🚀 Iniciar Motor de Roteirização (OR-Tools)", type="primary", use_container_width=True):
             if df_tasks_alocadas.empty: st.error("Selecione equipes válidas."); return
 
-            cap_total_check = st.session_state.input_obras_por_dia * limite_periodos * len(bases_records)
+            cap_total_check = st.session_state.input_obras_por_dia * dias_multiplier * limite_periodos * len(bases_records)
             obras_dia_final = st.session_state.input_obras_por_dia
             
             if cap_total_check > tot_obras_aprovadas and st.session_state.input_obras_por_dia > 0:
@@ -1400,7 +1474,7 @@ def view_roteirizador():
                 return
 
             if cap_total_check < tot_obras_aprovadas and len(bases_records) > 0 and st.session_state.input_obras_por_dia > 0:
-                obras_dia_final = math.ceil(tot_obras_aprovadas / (limite_periodos * len(bases_records)))
+                obras_dia_final = math.ceil(tot_obras_aprovadas / (dias_multiplier * limite_periodos * len(bases_records)))
                 st.toast(f"🔄 Capacidade reajustada automaticamente para {obras_dia_final} obras/dia para roteirizar toda a base.", icon="⚙️")
                 st.session_state.input_obras_por_dia = obras_dia_final
 
@@ -1411,10 +1485,12 @@ def view_roteirizador():
             
             st.session_state.vrp_state = {
                 'config': {
-                    'velocidade_media_kmh': 999.0, # Velocidade infinita
-                    'tempo_medio_obra': 0.1,       # Tempo irrisório
+                    'velocidade_media_kmh': 999.0, # Velocidade infinita para garantir que a distância não quebre a conta
+                    'tempo_medio_obra': 0.1,       # Tempo irrisório para garantir que a hora do dia não quebre a conta
                     'obras_por_dia': obras_dia_final, 
-                    'limite_periodos': limite_periodos
+                    'limite_periodos': limite_periodos,
+                    'tipo_periodo': tipo_periodo,
+                    'url_osrm_base': url_osrm_base
                 },
                 'b_names': list(set([b['LEVANTADOR'] for b in bases_records])),
                 'b_idx': 0, 'unvisited': df_tasks_alocadas.copy(), 'routed_data': [],
@@ -1427,8 +1503,9 @@ def view_roteirizador():
     # ---------------------------------------------------------
     def fetch_geom_wrapper(item):
         vel = st.session_state.vrp_state.get('config', {}).get('velocidade_media_kmh', 999.0)
+        url_osrm = st.session_state.vrp_state.get('config', {}).get('url_osrm_base', "http://router.project-osrm.org")
         try:
-            geom, dur_sec = obter_rota_ruas(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'], "http://router.project-osrm.org", vel)
+            geom, dur_sec = obter_rota_ruas(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'], url_osrm, vel)
             return geom, dur_sec
         except Exception:
             coords = np.array([[item['lat_ant'], item['lon_ant']], [item['lat_atual'], item['lon_atual']]])
@@ -1515,9 +1592,9 @@ def view_roteirizador():
                     
                     ordered_macros = []
                     if prio_macros:
-                        ordered_macros.extend(resolver_tsp_ortools(prio_macros, base_lat, base_lon, "http://router.project-osrm.org"))
+                        ordered_macros.extend(resolver_tsp_ortools(prio_macros, base_lat, base_lon, cfg['url_osrm_base']))
                     if comum_macros:
-                        ordered_macros.extend(resolver_tsp_ortools(comum_macros, base_lat, base_lon, "http://router.project-osrm.org"))
+                        ordered_macros.extend(resolver_tsp_ortools(comum_macros, base_lat, base_lon, cfg['url_osrm_base']))
                         
                     ordered_tasks = []
                     for macro in ordered_macros:
@@ -1526,6 +1603,8 @@ def view_roteirizador():
                     
                     rotas_flat = []
                     dia_absoluto = 1
+                    semana_atual = 1
+                    dia_da_semana = 1
                     obras_no_periodo_macro = 0
                     
                     agora_dt = datetime.now()
@@ -1545,7 +1624,8 @@ def view_roteirizador():
                     for obra in ordered_tasks:
                         qtd_real = len(obra.get('_ORIGINAL_ROWS', [1])) if isinstance(obra.get('_ORIGINAL_ROWS'), list) else 1
                         
-                        if dia_absoluto > cfg['limite_periodos']: break
+                        if cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']: break
+                        if cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']: break
 
                         viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
                         
@@ -1570,15 +1650,22 @@ def view_roteirizador():
                                 'obra': None, 'is_lunch': False, 'is_retorno': True,
                                 'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
                                 'lat_atual': base_lat, 'lon_atual': base_lon,
-                                'dia': dia_absoluto,
+                                'semana': semana_atual, 'dia': dia_absoluto,
                                 'hora_inicio': estado['time'], 'hora_fim': ret_fim,
                                 'viagem_min': viagem_ret, 'dist_km': dist_ret
                             })
                             
                             dia_absoluto += 1
                             obras_no_periodo_macro = 0
+                            
+                            if cfg['tipo_periodo'] == "Semana":
+                                dia_da_semana += 1
+                                if dia_da_semana > 6:
+                                    semana_atual += 1
+                                    dia_da_semana = 1
                                     
-                            if dia_absoluto > cfg['limite_periodos']: break
+                            if cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']: break
+                            if cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']: break
                                 
                             estado = iniciar_dia(dia_absoluto)
                             
@@ -1593,7 +1680,7 @@ def view_roteirizador():
                             'obra': obra, 'is_lunch': False, 'is_retorno': False,
                             'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
                             'lat_atual': obra['LATITUDE'], 'lon_atual': obra['LONGITUDE'],
-                            'dia': dia_absoluto,
+                            'semana': semana_atual, 'dia': dia_absoluto,
                             'hora_inicio': chegada_prevista, 'hora_fim': fim_previsto,
                             'viagem_min': viagem_min, 'dist_km': viagem_km
                         })
@@ -1604,7 +1691,7 @@ def view_roteirizador():
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
 
-                    if estado['obras_hoje'] > 0 and not (dia_absoluto > cfg['limite_periodos']):
+                    if estado['obras_hoje'] > 0 and not (cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']) and not (cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']):
                         dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
                         viagem_ret = (dist_ret / cfg['velocidade_media_kmh']) * 60
                         ret_fim = estado['time'] + pd.Timedelta(minutes=viagem_ret)
@@ -1612,7 +1699,7 @@ def view_roteirizador():
                             'obra': None, 'is_lunch': False, 'is_retorno': True,
                             'lat_ant': estado['lat'], 'lon_ant': estado['lon'],
                             'lat_atual': base_lat, 'lon_atual': base_lon,
-                            'dia': dia_absoluto,
+                            'semana': semana_atual, 'dia': dia_absoluto,
                             'hora_inicio': estado['time'], 'hora_fim': ret_fim,
                             'viagem_min': viagem_ret, 'dist_km': dist_ret
                         })
@@ -1622,7 +1709,7 @@ def view_roteirizador():
 
                     ordem_global = 1
                     for item, (geom, dur_sec) in zip(rotas_flat, geoms_and_durs):
-                        periodo_val = item['dia']
+                        periodo_val = item['semana'] if cfg['tipo_periodo'] == "Semana" else item['dia']
                         dia_nome_str = f"Dia {item['dia']}"
                         
                         if item['is_retorno']:
@@ -1631,6 +1718,7 @@ def view_roteirizador():
                                 'LATITUDE': item['lat_atual'], 'LONGITUDE': item['lon_atual'],
                                 'BASE_ATRIBUIDA': b_name, 'ORDEM': ordem_global, 
                                 'NOME_DIA': dia_nome_str,
+                                'SEMANA': item['semana'],
                                 'DIA': item['dia'], 
                                 'PERIODO': periodo_val,
                                 'DISTANCIA_PONTO_ANTERIOR_KM': round(item['dist_km'], 2), 
@@ -1644,6 +1732,7 @@ def view_roteirizador():
                             obra = item['obra']
                             obra['ORDEM'] = ordem_global
                             obra['NOME_DIA'] = dia_nome_str
+                            obra['SEMANA'] = item['semana']
                             obra['DIA'] = item['dia']
                             obra['PERIODO'] = periodo_val
                             obra['DISTANCIA_PONTO_ANTERIOR_KM'] = round(item['dist_km'], 2)
@@ -1705,6 +1794,8 @@ def view_roteirizador():
         buf_zip_xl = io.BytesIO()
         buf_zip_kml = io.BytesIO()
         
+        tipo_periodo_atual = st.session_state.vrp_state.get('config', {}).get('tipo_periodo', 'Dia')
+        
         try:
             with zipfile.ZipFile(buf_zip_xl, 'w', zipfile.ZIP_DEFLATED) as zip_xl, \
                  zipfile.ZipFile(buf_zip_kml, 'w', zipfile.ZIP_DEFLATED) as zip_kml:
@@ -1752,7 +1843,7 @@ def view_roteirizador():
                 zip_xl.writestr(f"Resumo_Levantadores - {data_atual_formatada}.xlsx", gerar_excel_resumo_bytes(df_resumo))
                 
                 update_ui("Gerando Mapa KML Consolidado de todas as rotas...")
-                kml_geral_str = gerar_kml_agrupado(df_routed, st.session_state.bases_records, f"ROTA TOTAL LEVANTADORES - {data_atual_formatada}", st.session_state.colunas_exibir, bases_unicas)
+                kml_geral_str = gerar_kml_agrupado(df_routed, st.session_state.bases_records, f"ROTA TOTAL LEVANTADORES - {data_atual_formatada}", st.session_state.colunas_exibir, bases_unicas, tipo_periodo_atual)
                 zip_kml.writestr(f"ROTA TOTAL LEVANTADORES - {data_atual_formatada}.kml", kml_geral_str.encode('utf-8'))
                 
                 for base_nome in bases_unicas:
@@ -1764,7 +1855,7 @@ def view_roteirizador():
                     zip_xl.writestr(f"ROTA_{nome_seguro} - {data_atual_formatada}.xlsx", gerar_excel_bytes(df_lev, st.session_state.col_prioridade, st.session_state.colunas_originais))
                     
                     update_ui(f"Traçando Mapa KML individual para: {base_nome}...")
-                    kml_lev_str = gerar_kml_agrupado(df_lev, st.session_state.bases_records, f"ROTA_{nome_seguro} - {data_atual_formatada}", st.session_state.colunas_exibir, bases_unicas)
+                    kml_lev_str = gerar_kml_agrupado(df_lev, st.session_state.bases_records, f"ROTA_{nome_seguro} - {data_atual_formatada}", st.session_state.colunas_exibir, bases_unicas, tipo_periodo_atual)
                     zip_kml.writestr(f"ROTA_{nome_seguro} - {data_atual_formatada}.kml", kml_lev_str.encode('utf-8'))
                     
             st.session_state.bytes_zip_xl = buf_zip_xl.getvalue()
