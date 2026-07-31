@@ -647,7 +647,7 @@ def view_roteirizador():
             padding: 24px !important;
             border-radius: 16px !important;
             z-index: 999999 !important;
-            width: 380px !important;
+            width: 350px !important;
             text-align: left !important;
             box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.15) !important;
         }
@@ -746,14 +746,19 @@ def view_roteirizador():
             dias_mult = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
             qtd_eq = st.session_state.get('qtd_equipes_ativas', 0)
             
-            if qtd_eq > 0:
-                cap_total_estimada = obras_por_dia * dias_mult * limite_periodos * qtd_eq
-                txt_cap = f"{cap_total_estimada} obras totais ({qtd_eq} equipes)"
-            else:
-                cap_total_estimada = obras_por_dia * dias_mult * limite_periodos
-                txt_cap = f"{cap_total_estimada} obras (Por equipe)"
-                
-            st.text_input("Capacidade Calculada:", value=txt_cap, disabled=True)
+            cap_total_estimada = obras_por_dia * dias_mult * limite_periodos * (qtd_eq if qtd_eq > 0 else 1)
+            
+            st.markdown(f'''
+            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Capacidade Máxima Obras:</label>
+            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed;">
+                {cap_total_estimada} Obras
+            </div>
+            
+            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Equipes na Planilha:</label>
+            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 5px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed;">
+                {qtd_eq if qtd_eq > 0 else "0"} Equipes
+            </div>
+            ''', unsafe_allow_html=True)
             
         with st.expander("📡 Conexão de Rede (Avançado)", expanded=False):
             url_osrm_base = st.text_input("Endpoint OSRM ⚠️ (NÃO APAGUE OU EDITE):", value="http://router.project-osrm.org", disabled=is_locked)
@@ -1616,6 +1621,9 @@ def view_roteirizador():
                                     semana_atual += 1
                                     dia_da_semana = 1
                                     
+                            if cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']: break
+                            if cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']: break
+                                
                             estado = iniciar_dia(dia_absoluto)
                             
                             viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
@@ -1644,7 +1652,7 @@ def view_roteirizador():
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
 
-                    if estado['obras_hoje'] > 0:
+                    if estado['obras_hoje'] > 0 and not (cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']) and not (cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']):
                         dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
                         viagem_ret = (dist_ret / cfg['velocidade_media_kmh']) * 60
                         ret_fim = estado['time'] + pd.Timedelta(minutes=viagem_ret)
