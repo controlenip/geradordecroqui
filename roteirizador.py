@@ -665,9 +665,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
     # ---------------------------------------------------------
     if status_exec == "IDLE" and not is_done:
         
-        levs_selecionados_glob = []
-        levs_temp_selecionados_glob = []
-        
         col_up_1, col_up_2 = st.columns(2)
 
         with col_up_1:
@@ -690,7 +687,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         opcoes_levs = sorted([str(x) for x in df_bases_temp_ui['LEVANTADOR'].dropna().unique().tolist() if str(x).upper().strip() != 'SEM LEVANTADOR'])
                         
                         levs_selecionados = st.multiselect("Selecione as Equipes Principais:", opcoes_levs, default=opcoes_levs)
-                        levs_selecionados_glob = levs_selecionados
+                        st.session_state.temp_eq_princ = levs_selecionados
                         
                         if levs_selecionados:
                             df_bases = df_bases_temp_ui[df_bases_temp_ui['LEVANTADOR'].isin(levs_selecionados)].copy()
@@ -765,7 +762,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         opcoes_levs_temp = sorted([str(x) for x in df_bases_temp_full['LEVANTADOR'].dropna().unique().tolist() if str(x).upper().strip() != 'SEM LEVANTADOR'])
                         
                         levs_temp_selecionados = st.multiselect("Selecione as Equipes:", opcoes_levs_temp, default=opcoes_levs_temp)
-                        levs_temp_selecionados_glob = levs_temp_selecionados
+                        st.session_state.temp_eq_apoio = levs_temp_selecionados
                         
                         if levs_temp_selecionados:
                             df_bases_temp = df_bases_temp_full[df_bases_temp_full['LEVANTADOR'].isin(levs_temp_selecionados)].copy()
@@ -793,7 +790,9 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     st.error(f"Erro: {e}")
 
             # === CÁLCULO DINÂMICO DE EQUIPES E PAINEL LATERAL ===
-            qtd_eq_atual_live = len(levs_selecionados_glob) + len(levs_temp_selecionados_glob)
+            qtd_eq_princ = len(st.session_state.get('temp_eq_princ', []))
+            qtd_eq_temp = len(st.session_state.get('temp_eq_apoio', []))
+            qtd_eq_atual_live = qtd_eq_princ + qtd_eq_temp
             st.session_state.qtd_equipes_ativas = qtd_eq_atual_live
             
             dias_mult_live = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
@@ -1100,6 +1099,9 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
             
             df_unallocated = df_tasks[df_tasks['BASE_ATRIBUIDA'] == "NÃO ALOCADO"]
             df_tasks_alocadas = df_tasks[df_tasks['BASE_ATRIBUIDA'] != "NÃO ALOCADO"].copy()
+
+            tot_unallocated = sum(len(r['_ORIGINAL_ROWS']) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1 for _, r in df_unallocated.iterrows())
+            st.session_state.tot_obras_nao_alocadas = tot_unallocated
 
             if df_tasks_alocadas.empty: 
                 st.error("Nenhuma obra encontrou equipes com cobertura geográfica. Verifique as configurações de base e municípios.")
