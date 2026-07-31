@@ -753,8 +753,6 @@ def view_roteirizador():
                 else:
                     st.caption(f"ℹ️ Cada semana terá **{len(dias_semana_selecionados)} dias** alocados.")
                 
-            st.info("⚡ **Quota Matemática Exata Ativada:** A IA ignorará qualquer limite de horas no dia ou distância em KM para garantir que o Levantador receba exatamente a quantidade de obras solicitada abaixo.")
-            
             obras_por_dia = st.number_input("Obras Previstas por Dia", min_value=1, value=30, step=1, disabled=is_locked)
             limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
             
@@ -975,7 +973,7 @@ def view_roteirizador():
                         <div style="padding:10px; background:#fafafa; font-size:12px;">
                             <table style="width:100%; border-collapse:collapse;">
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', 'Dia')})</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
@@ -1494,6 +1492,9 @@ def view_roteirizador():
 
         if st.button("🚀 Iniciar Motor de Roteirização (OR-Tools)", type="primary", use_container_width=True):
             if df_tasks_alocadas.empty: st.error("Selecione equipes válidas."); return
+            if tipo_periodo == "Semana" and not dias_semana_selecionados:
+                st.error("Selecione os dias da semana na barra lateral antes de continuar.")
+                return
 
             st.session_state.tarefas_alocadas_inicialmente = len(df_tasks_alocadas)
             st.session_state.bases_records = bases_records
