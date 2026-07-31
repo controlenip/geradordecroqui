@@ -136,6 +136,7 @@ def limpar_roteirizador():
     st.session_state.colunas_exibir = []
     st.session_state.col_prioridade = "TIPO NOTA"
     st.session_state.colunas_originais = []
+    st.session_state.show_capacity_modal = False
     if 'bytes_zip_xl' in st.session_state: del st.session_state['bytes_zip_xl']
     if 'bytes_zip_kml' in st.session_state: del st.session_state['bytes_zip_kml']
     ler_planilha_cached.clear()
@@ -624,9 +625,58 @@ def view_roteirizador():
     if "colunas_exibir" not in st.session_state: st.session_state.colunas_exibir = []
     if "col_prioridade" not in st.session_state: st.session_state.col_prioridade = "TIPO NOTA"
     if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
+    if "show_capacity_modal" not in st.session_state: st.session_state.show_capacity_modal = False
 
     status_exec = st.session_state.vrp_status
     is_done = st.session_state.roteamento_concluido
+
+    # TRATAMENTO DO POP-UP MODAL
+    if st.session_state.get('show_capacity_modal', False):
+        st.markdown("""
+        <style>
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) {
+            position: fixed !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            background-color: #d9534f !important;
+            border: 5px solid #000000 !important;
+            padding: 30px !important;
+            border-radius: 12px !important;
+            z-index: 999999 !important;
+            width: 500px !important;
+            text-align: center !important;
+            box-shadow: 0 0 0 100vw rgba(0,0,0,0.7) !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) h3,
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) p {
+            color: #ffffff !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) button {
+            background-color: #000000 !important;
+            color: #ffffff !important;
+            font-weight: bold !important;
+            border: 2px solid white !important;
+            margin-top: 15px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) button:hover {
+            background-color: #333333 !important;
+            color: #ffffff !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        with st.container(border=True):
+            st.markdown('<div class="cap-modal-marker"></div>', unsafe_allow_html=True)
+            st.markdown("### ⚠️ ALERTA: EXCESSO DE CAPACIDADE")
+            st.markdown(f"<p style='font-size:16px;'>A cota inserida roteiriza até <b>{st.session_state.cap_total_check}</b> obras, mas a planilha contém apenas <b>{st.session_state.tot_obras_aprovadas}</b> obras válidas.</p>", unsafe_allow_html=True)
+            st.markdown("<p style='font-size:14px; opacity:0.9;'>A capacidade configurada não deve ser maior que a demanda. Por favor, reajuste o Limite Diário de Obras para aproximar o cálculo.</p>", unsafe_allow_html=True)
+            
+            if st.button("❌ FECHAR E ZERAR COTA", use_container_width=True):
+                st.session_state.input_obras_por_dia = 0
+                st.session_state.show_capacity_modal = False
+                tentar_rerun()
+        st.stop()
 
     st.markdown("<h1 class='brand-title'>Plataforma Roteirizadora NIP v1.1</h1>", unsafe_allow_html=True)
 
@@ -679,6 +729,8 @@ def view_roteirizador():
                 
             obras_por_dia = st.number_input("Cota Diária de Obras (Por Equipe)", min_value=0, step=1, disabled=is_locked, key="input_obras_por_dia")
             limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
+            
+            st.info("✅ **Sem Barreiras:** O sistema roteirizará 100% da planilha, criando quantos dias e semanas forem necessários automaticamente.")
             
         with st.expander("📡 Conexão de Rede (Avançado)", expanded=False):
             url_osrm_base = st.text_input("Endpoint OSRM ⚠️ (NÃO APAGUE OU EDITE):", value="http://router.project-osrm.org", disabled=is_locked)
@@ -780,12 +832,15 @@ def view_roteirizador():
                     is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
                     if is_super:
                         cor_icone = 'orange'
+                    else:
+                        cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
+                    
+                    if is_super:
                         qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
                         pop_header_bg = "#FFD700"
                         pop_header_color = "#000000"
                         pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
                     else:
-                        cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
                         pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
                         pop_header_color = "#ffffff"
                         pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
@@ -1187,56 +1242,6 @@ def view_roteirizador():
         todas_bases_records = bases_principais_records + bases_temporarias_records
         
         if len(todas_bases_records) > 0:
-            
-            dias_multiplier = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
-            cap_total_check = st.session_state.input_obras_por_dia * dias_multiplier * limite_periodos * len(todas_bases_records)
-            
-            if cap_total_check < tot_obras_aprovadas and st.session_state.input_obras_por_dia > 0:
-                st.markdown("""
-                <style>
-                div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) {
-                    position: fixed !important;
-                    top: 50% !important;
-                    left: 50% !important;
-                    transform: translate(-50%, -50%) !important;
-                    background-color: #d9534f !important;
-                    border: 5px solid #000000 !important;
-                    padding: 30px !important;
-                    border-radius: 12px !important;
-                    z-index: 999999 !important;
-                    width: 500px !important;
-                    text-align: center !important;
-                    box-shadow: 0 0 0 100vw rgba(0,0,0,0.7) !important;
-                }
-                div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) h3,
-                div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) p {
-                    color: #ffffff !important;
-                }
-                div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) button {
-                    background-color: #000000 !important;
-                    color: #ffffff !important;
-                    font-weight: bold !important;
-                    border: 2px solid white !important;
-                    margin-top: 15px !important;
-                }
-                div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) button:hover {
-                    background-color: #333333 !important;
-                    color: #ffffff !important;
-                }
-                </style>
-                """, unsafe_allow_html=True)
-
-                with st.container(border=True):
-                    st.markdown('<div class="cap-modal-marker"></div>', unsafe_allow_html=True)
-                    st.markdown("### ⚠️ ALERTA: EXCESSO DE CAPACIDADE")
-                    st.markdown(f"<p style='font-size:16px;'>O limite que você definiu na barra lateral roteiriza até <b>{cap_total_check}</b> obras, mas a planilha contém <b>{tot_obras_aprovadas}</b> obras válidas prontas para roteamento.</p>", unsafe_allow_html=True)
-                    st.markdown("<p style='font-size:14px; opacity:0.9;'>A capacidade configurada não deve ser menor que a demanda. Por favor, feche este aviso e aumente o limite de obras ou dias para roteirizar a base inteira sem perdas.</p>", unsafe_allow_html=True)
-                    
-                    if st.button("❌ FECHAR E ZERAR COTA DIÁRIA", use_container_width=True):
-                        st.session_state.input_obras_por_dia = 0
-                        tentar_rerun()
-                st.stop()
-            
             df_tasks['BASE_ATRIBUIDA'] = "NÃO ALOCADO"
             
             df_tasks['COORD_KEY'] = df_tasks['LATITUDE'].astype(str) + "_" + df_tasks['LONGITUDE'].astype(str)
@@ -1268,6 +1273,8 @@ def view_roteirizador():
                             if b['LEVANTADOR'] not in mun_to_main[m_limpo]: mun_to_main[m_limpo].append(b['LEVANTADOR'])
 
             base_counts = {b['LEVANTADOR']: 0 for b in todas_bases_records}
+            
+            dias_multiplier = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
             max_capacity = st.session_state.input_obras_por_dia * dias_multiplier * limite_periodos
 
             def assign_load_balanced(df_sub, allowed_bases, is_prio=False):
@@ -1367,6 +1374,15 @@ def view_roteirizador():
             if tipo_periodo == "Semana" and not dias_semana_selecionados:
                 st.error("Selecione os dias da semana na barra lateral antes de continuar.")
                 return
+
+            dias_multiplier = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
+            cap_total_check = st.session_state.input_obras_por_dia * dias_multiplier * limite_periodos * len(bases_records)
+            
+            if cap_total_check > tot_obras_aprovadas and st.session_state.input_obras_por_dia > 0:
+                st.session_state.show_capacity_modal = True
+                st.session_state.cap_total_check = cap_total_check
+                st.session_state.tot_obras_aprovadas = tot_obras_aprovadas
+                tentar_rerun()
 
             st.session_state.tarefas_alocadas_inicialmente = len(df_tasks_alocadas)
             st.session_state.bases_records = bases_records
@@ -1574,9 +1590,6 @@ def view_roteirizador():
                                     semana_atual += 1
                                     dia_da_semana = 1
                                     
-                            if cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']: break
-                            if cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']: break
-                                
                             estado = iniciar_dia(dia_absoluto)
                             
                             viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
@@ -1605,7 +1618,7 @@ def view_roteirizador():
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
 
-                    if estado['obras_hoje'] > 0 and not (cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']) and not (cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']):
+                    if estado['obras_hoje'] > 0:
                         dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
                         viagem_ret = (dist_ret / cfg['velocidade_media_kmh']) * 60
                         ret_fim = estado['time'] + pd.Timedelta(minutes=viagem_ret)
