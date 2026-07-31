@@ -680,8 +680,6 @@ def view_roteirizador():
             obras_por_dia = st.number_input("Cota Diária de Obras (Por Equipe)", min_value=0, step=1, disabled=is_locked, key="input_obras_por_dia")
             limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
             
-            st.info("✅ **Sem Barreiras:** O sistema roteirizará 100% da planilha, criando quantos dias e semanas forem necessários automaticamente.")
-            
         with st.expander("📡 Conexão de Rede (Avançado)", expanded=False):
             url_osrm_base = st.text_input("Endpoint OSRM ⚠️ (NÃO APAGUE OU EDITE):", value="http://router.project-osrm.org", disabled=is_locked)
             st.caption("Este link conecta o sistema à malha viária real de ruas do mundo.")
@@ -782,15 +780,12 @@ def view_roteirizador():
                     is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
                     if is_super:
                         cor_icone = 'orange'
-                    else:
-                        cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
-                    
-                    if is_super:
                         qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
                         pop_header_bg = "#FFD700"
                         pop_header_color = "#000000"
                         pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
                     else:
+                        cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
                         pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
                         pop_header_color = "#ffffff"
                         pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
@@ -1379,12 +1374,6 @@ def view_roteirizador():
             st.session_state.colunas_exibir = colunas_exibir
             st.session_state.col_prioridade = col_prioridade
             
-            st.session_state.config_financeira = {
-                'custo_combustivel': custo_combustivel,
-                'consumo_veiculo': consumo_veiculo,
-                'custo_hora_equipe': custo_hora_equipe
-            }
-            
             st.session_state.vrp_state = {
                 'config': {
                     'velocidade_media_kmh': 30.0,
@@ -1585,6 +1574,9 @@ def view_roteirizador():
                                     semana_atual += 1
                                     dia_da_semana = 1
                                     
+                            if cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']: break
+                            if cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']: break
+                                
                             estado = iniciar_dia(dia_absoluto)
                             
                             viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
@@ -1613,7 +1605,7 @@ def view_roteirizador():
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
 
-                    if estado['obras_hoje'] > 0:
+                    if estado['obras_hoje'] > 0 and not (cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']) and not (cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']):
                         dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
                         viagem_ret = (dist_ret / cfg['velocidade_media_kmh']) * 60
                         ret_fim = estado['time'] + pd.Timedelta(minutes=viagem_ret)
