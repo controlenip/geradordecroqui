@@ -665,8 +665,8 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
     # ---------------------------------------------------------
     if status_exec == "IDLE" and not is_done:
         
-        levs_selecionados = []
-        levs_temp_selecionados = []
+        levs_selecionados_glob = []
+        levs_temp_selecionados_glob = []
         
         col_up_1, col_up_2 = st.columns(2)
 
@@ -690,6 +690,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         opcoes_levs = sorted([str(x) for x in df_bases_temp_ui['LEVANTADOR'].dropna().unique().tolist() if str(x).upper().strip() != 'SEM LEVANTADOR'])
                         
                         levs_selecionados = st.multiselect("Selecione as Equipes Principais:", opcoes_levs, default=opcoes_levs)
+                        levs_selecionados_glob = levs_selecionados
                         
                         if levs_selecionados:
                             df_bases = df_bases_temp_ui[df_bases_temp_ui['LEVANTADOR'].isin(levs_selecionados)].copy()
@@ -764,6 +765,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         opcoes_levs_temp = sorted([str(x) for x in df_bases_temp_full['LEVANTADOR'].dropna().unique().tolist() if str(x).upper().strip() != 'SEM LEVANTADOR'])
                         
                         levs_temp_selecionados = st.multiselect("Selecione as Equipes:", opcoes_levs_temp, default=opcoes_levs_temp)
+                        levs_temp_selecionados_glob = levs_temp_selecionados
                         
                         if levs_temp_selecionados:
                             df_bases_temp = df_bases_temp_full[df_bases_temp_full['LEVANTADOR'].isin(levs_temp_selecionados)].copy()
@@ -790,8 +792,8 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
-            # === ATUALIZAÇÃO DA PONTE FANTASMA (SIDEBAR) EM TEMPO REAL ===
-            qtd_eq_atual_live = len(levs_selecionados) + len(levs_temp_selecionados)
+            # === CÁLCULO DINÂMICO DE EQUIPES E PAINEL LATERAL ===
+            qtd_eq_atual_live = len(levs_selecionados_glob) + len(levs_temp_selecionados_glob)
             st.session_state.qtd_equipes_ativas = qtd_eq_atual_live
             
             dias_mult_live = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
