@@ -656,7 +656,7 @@ def view_roteirizador():
                 unsafe_allow_html=True
             )
             
-        with st.expander("⚙️ Esforço e Limites Diários", expanded=True):
+        with st.expander("⚙️ Esforço e Limites", expanded=True):
             tipo_periodo = st.radio("Agrupamento de percurso:", ["Dia", "Semana"], horizontal=True, disabled=is_locked)
             dias_semana_selecionados = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"]
             
@@ -670,17 +670,9 @@ def view_roteirizador():
                 if not dias_semana_selecionados:
                     st.warning("⚠️ Selecione pelo menos 1 dia da semana para o cálculo.")
                 
-            tem_san = bool(st.session_state.get('san_uploader'))
-            modo_limite_opcoes = ["Quantidade Fixa de Obras", "Saneamento (Forçar Quota / 24h)"]
-            idx_padrao = 1 if tem_san else 0
+            obras_por_dia = st.number_input("Cota Diária de Obras (Por Equipe)", min_value=1, value=30, step=1, disabled=is_locked)
             
-            modo_limite = st.radio("Critério limitador:", modo_limite_opcoes, index=idx_padrao, disabled=is_locked)
-            
-            obras_por_dia = st.number_input("Obras Previstas por Dia (Por Equipe)", min_value=1, value=30, step=1, disabled=is_locked)
-            limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
-            
-            tempo_medio_obra = 0.5
-            velocidade_media_kmh = 30.0
+            st.info("✅ **Sem Barreiras:** O sistema roteirizará 100% da planilha, criando quantos dias e semanas forem necessários automaticamente.")
 
         with st.expander("💰 Custos e Gestão Financeira", expanded=False):
             custo_combustivel = st.number_input("Custo Combustível (R$/L)", min_value=0.0, value=0.0, step=0.1, disabled=is_locked)
@@ -735,7 +727,7 @@ def view_roteirizador():
                 is_saneamento_puro = True
 
         if 'tot_obras_nao_alocadas' in st.session_state and st.session_state.tot_obras_nao_alocadas > 0:
-            st.warning(f"⚠️ **CAPACIDADE ATINGIDA:** {st.session_state.tot_obras_nao_alocadas} obras ficaram de fora. **DICA:** Para roteirizar todas as obras, vá no menu lateral esquerdo ('Esforço e Limites Diários') e aumente o número de 'Obras Previstas por Dia' ou o 'Limite total de Dias/Semanas'.")
+            st.warning(f"⚠️ **OBRAS SEM COBERTURA:** {st.session_state.tot_obras_nao_alocadas} obras não encontraram nenhuma equipe geograficamente compatível (verifique a regra de municípios).")
 
         c_m1, c_m2, c_m3, c_m4 = st.columns(4)
         c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #0D256C;"><div class="metric-icon" style="background: rgba(13, 37, 108, 0.12);">🎯</div><div class="metric-content"><div class="metric-title">TOTAL DE OBRAS ROTEIRIZADAS</div><div class="metric-value">{tot_obras_reais} <span style="font-size:12px;color:#888;">(Em {tot_paradas} Pontos)</span></div></div></div>', unsafe_allow_html=True)
@@ -1254,11 +1246,6 @@ def view_roteirizador():
                             if m_limpo not in mun_to_main: mun_to_main[m_limpo] = []
                             if b['LEVANTADOR'] not in mun_to_main[m_limpo]: mun_to_main[m_limpo].append(b['LEVANTADOR'])
 
-            base_counts = {b['LEVANTADOR']: 0 for b in todas_bases_records}
-            
-            dias_multiplier = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
-            max_capacity = obras_por_dia * dias_multiplier * limite_periodos
-
             def assign_load_balanced(df_sub, allowed_bases, is_prio=False):
                 if df_sub.empty or not allowed_bases: return pd.DataFrame(), df_sub.copy()
                 df_sub = df_sub.sort_values(by=['LATITUDE', 'LONGITUDE'])
@@ -1287,20 +1274,18 @@ def view_roteirizador():
                     if pd.notna(lat) and pd.notna(lon):
                         for b in valid_bases:
                             b_name = b['LEVANTADOR']
-                            if base_counts[b_name] + qtd_real <= max_capacity:
-                                b_lat, b_lon = b.get('LATITUDE'), b.get('LONGITUDE')
-                                if pd.notna(b_lat) and pd.notna(b_lon):
-                                    d = haversine_scalar(lat, lon, float(b_lat), float(b_lon))
+                            b_lat, b_lon = b.get('LATITUDE'), b.get('LONGITUDE')
+                            if pd.notna(b_lat) and pd.notna(b_lon):
+                                d = haversine_scalar(lat, lon, float(b_lat), float(b_lon))
+                                
+                                if tipo_atribuicao == "Por Proximidade Geográfica das Coordenadas (Ignora texto)" and d > 100.0:
+                                    continue 
                                     
-                                    if tipo_atribuicao == "Por Proximidade Geográfica das Coordenadas (Ignora texto)" and d > 100.0:
-                                        continue 
-                                        
-                                    if d < best_dist:
-                                        best_dist = d
-                                        best_base = b_name
+                                if d < best_dist:
+                                    best_dist = d
+                                    best_base = b_name
                                     
                     if best_base:
-                        base_counts[best_base] += qtd_real
                         row['BASE_ATRIBUIDA'] = best_base
                         assigned_rows.append(row)
                     else:
@@ -1328,8 +1313,7 @@ def view_roteirizador():
             st.session_state.tot_obras_nao_alocadas = tot_unallocated
 
             if df_tasks_alocadas.empty: 
-                st.error("Nenhuma obra encontrou equipes com cobertura geográfica ou com limite diário disponível.")
-                if tot_unallocated > 0: st.warning(f"⚠️ {tot_unallocated} obras ficaram de fora e não puderam ser roteirizadas. Aumente o Limite de Semanas/Dias na configuração ou adicione novos Levantadores na planilha.")
+                st.error("Nenhuma obra encontrou equipes com cobertura geográfica. Verifique as configurações de base e municípios.")
                 return
                 
             bases_records = todas_bases_records 
@@ -1374,7 +1358,7 @@ def view_roteirizador():
                 'config': {
                     'velocidade_media_kmh': 30.0,
                     'tempo_medio_obra': 0.5,
-                    'obras_por_dia': obras_por_dia, 'tipo_periodo': tipo_periodo, 'limite_periodos': limite_periodos,
+                    'obras_por_dia': obras_por_dia, 'tipo_periodo': tipo_periodo, 
                     'dias_selecionados': dias_semana_selecionados
                 },
                 'b_names': list(set([b['LEVANTADOR'] for b in bases_records])),
@@ -1508,9 +1492,6 @@ def view_roteirizador():
                     for obra in ordered_tasks:
                         qtd_real = len(obra.get('_ORIGINAL_ROWS', [1])) if isinstance(obra.get('_ORIGINAL_ROWS'), list) else 1
                         
-                        if cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']: break
-                        if cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']: break
-
                         viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
                         
                         if viagem_km < 0.05 and estado['obras_hoje'] > 0:
@@ -1568,9 +1549,6 @@ def view_roteirizador():
                                     semana_atual += 1
                                     dia_da_semana = 1
                                     
-                            if cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']: break
-                            if cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']: break
-                                
                             estado = iniciar_dia(dia_absoluto)
                             
                             viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
@@ -1599,7 +1577,7 @@ def view_roteirizador():
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
 
-                    if estado['obras_hoje'] > 0 and not (cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']) and not (cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']):
+                    if estado['obras_hoje'] > 0:
                         dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
                         viagem_ret = (dist_ret / cfg['velocidade_media_kmh']) * 60
                         ret_fim = estado['time'] + pd.Timedelta(minutes=viagem_ret)
