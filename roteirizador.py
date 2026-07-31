@@ -136,6 +136,8 @@ def limpar_roteirizador():
     st.session_state.colunas_exibir = []
     st.session_state.col_prioridade = "TIPO NOTA"
     st.session_state.colunas_originais = []
+    st.session_state.show_capacity_modal = False
+    st.session_state.qtd_equipes_ativas = 0
     if 'bytes_zip_xl' in st.session_state: del st.session_state['bytes_zip_xl']
     if 'bytes_zip_kml' in st.session_state: del st.session_state['bytes_zip_kml']
     ler_planilha_cached.clear()
@@ -549,6 +551,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
                     
                     if is_super:
+                        cor_icone = 'orange'
                         qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
                         pop_header_bg = "#FFD700"
                         pop_header_color = "#000000"
@@ -624,9 +627,69 @@ def view_roteirizador():
     if "colunas_exibir" not in st.session_state: st.session_state.colunas_exibir = []
     if "col_prioridade" not in st.session_state: st.session_state.col_prioridade = "TIPO NOTA"
     if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
+    if "show_capacity_modal" not in st.session_state: st.session_state.show_capacity_modal = False
+    if "qtd_equipes_ativas" not in st.session_state: st.session_state.qtd_equipes_ativas = 0
 
     status_exec = st.session_state.vrp_status
     is_done = st.session_state.roteamento_concluido
+
+    # TRATAMENTO DO POP-UP MODAL TIPO WHATSAPP
+    if st.session_state.get('show_capacity_modal', False):
+        st.markdown("""
+        <style>
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) {
+            position: fixed !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            background-color: #ffffff !important;
+            border: 1px solid #e0e0e0 !important;
+            padding: 24px !important;
+            border-radius: 16px !important;
+            z-index: 999999 !important;
+            width: 350px !important;
+            text-align: left !important;
+            box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.15) !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) h3 {
+            color: #d9534f !important;
+            font-size: 1.1rem !important;
+            margin-bottom: 10px !important;
+            border-bottom: 1px solid #eee !important;
+            padding-bottom: 10px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) p {
+            color: #333333 !important;
+            margin-bottom: 8px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) button {
+            background-color: #f8f9fa !important;
+            color: #d9534f !important;
+            font-weight: bold !important;
+            border: 1px solid #ddd !important;
+            margin-top: 15px !important;
+            padding: 8px 12px !important;
+            border-radius: 8px !important;
+            width: 100% !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) button:hover {
+            background-color: #f1f3f5 !important;
+            border-color: #ccc !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        with st.container(border=False):
+            st.markdown('<div class="cap-modal-marker"></div>', unsafe_allow_html=True)
+            st.markdown("### ⚠️ Excesso de Capacidade")
+            st.markdown(f"<p style='font-size:14px;'>A cota roteiriza até <b>{st.session_state.cap_total_check}</b> obras, mas há <b>{st.session_state.tot_obras_aprovadas}</b> obras válidas prontas na fila.</p>", unsafe_allow_html=True)
+            st.markdown("<p style='font-size:13px; color:#666;'>Reajuste o Limite Diário na barra lateral para aproximar o cálculo.</p>", unsafe_allow_html=True)
+            
+            if st.button("✖ Fechar e Zerar Cota", use_container_width=True):
+                st.session_state.input_obras_por_dia = 0
+                st.session_state.show_capacity_modal = False
+                tentar_rerun()
+        st.stop()
 
     st.markdown("<h1 class='brand-title'>Plataforma Roteirizadora NIP v1.1</h1>", unsafe_allow_html=True)
 
@@ -712,9 +775,6 @@ def view_roteirizador():
             if 'SANEAMENTO' in origens and 'LEVANTAMENTO' not in origens:
                 is_saneamento_puro = True
 
-        if 'tot_obras_nao_alocadas' in st.session_state and st.session_state.tot_obras_nao_alocadas > 0:
-            st.warning(f"⚠️ **OBRAS SEM COBERTURA:** {st.session_state.tot_obras_nao_alocadas} obras não encontraram nenhuma equipe geograficamente compatível (verifique a regra de municípios).")
-
         c_m1, c_m2, c_m3, c_m4 = st.columns(4)
         c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #0D256C;"><div class="metric-icon" style="background: rgba(13, 37, 108, 0.12);">🎯</div><div class="metric-content"><div class="metric-title">TOTAL DE OBRAS ROTEIRIZADAS</div><div class="metric-value">{tot_obras_reais} <span style="font-size:12px;color:#888;">(Em {tot_paradas} Pontos)</span></div></div></div>', unsafe_allow_html=True)
         c_m2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👥</div><div class="metric-content"><div class="metric-title">Equipes Alocadas</div><div class="metric-value">{tot_equipes}</div></div></div>', unsafe_allow_html=True)
@@ -765,15 +825,12 @@ def view_roteirizador():
                     is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
                     if is_super:
                         cor_icone = 'orange'
-                    else:
-                        cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
-                    
-                    if is_super:
                         qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
                         pop_header_bg = "#FFD700"
                         pop_header_color = "#000000"
                         pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
                     else:
+                        cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
                         pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
                         pop_header_color = "#ffffff"
                         pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
@@ -992,44 +1049,26 @@ def view_roteirizador():
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
-            # === CÁLCULO DE EQUIPES PARA A BARRA LATERAL ===
+            # === CÁLCULO DINÂMICO DE EQUIPES ===
             qtd_eq_princ = len(levs_selecionados) if 'levs_selecionados' in locals() and levs_selecionados else 0
             qtd_eq_temp = len(levs_temp_selecionados) if 'levs_temp_selecionados' in locals() and levs_temp_selecionados else 0
-            qtd_eq_atual = qtd_eq_princ + qtd_eq_temp
-
-            with sidebar_esforco_placeholder.container():
-                with st.expander("⚙️ Esforço e Limites", expanded=True):
-                    tipo_periodo = st.radio("Agrupamento de percurso:", ["Dia", "Semana"], horizontal=True, disabled=is_locked)
-                    
-                    dias_semana_selecionados = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"]
-                    if tipo_periodo == "Semana":
-                        dias_semana_selecionados = st.multiselect(
-                            "Dias úteis na semana:",
-                            ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"],
-                            default=["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"],
-                            disabled=is_locked
-                        )
-                        
-                    if "input_obras_por_dia" not in st.session_state:
-                        st.session_state.input_obras_por_dia = 30
-                        
-                    obras_por_dia = st.number_input("Cota Diária de Obras (Por Equipe)", min_value=1, step=1, disabled=is_locked, key="input_obras_por_dia")
-                    limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
-                    
-                    dias_mult = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
-                    cap_total_estimada = obras_por_dia * dias_mult * limite_periodos * (qtd_eq_atual if qtd_eq_atual > 0 else 1)
-                    
-                    st.markdown(f'''
-                    <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Capacidade Máxima Obras:</label>
-                    <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed;">
-                        {cap_total_estimada} Obras totais
-                    </div>
-                    
-                    <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Equipes na Planilha:</label>
-                    <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 5px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed;">
-                        {qtd_eq_atual} Equipes
-                    </div>
-                    ''', unsafe_allow_html=True)
+            qtd_eq_atual_live = qtd_eq_princ + qtd_eq_temp
+            st.session_state.qtd_equipes_ativas = qtd_eq_atual_live
+            
+            dias_mult = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
+            cap_total_estimada_live = obras_por_dia * dias_mult * limite_periodos * (qtd_eq_atual_live if qtd_eq_atual_live > 0 else 1)
+            
+            sidebar_esforco_placeholder.markdown(f'''
+            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Capacidade Máxima Obras:</label>
+            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed;">
+                {cap_total_estimada_live} Obras totais
+            </div>
+            
+            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Equipes na Planilha:</label>
+            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 5px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed;">
+                {qtd_eq_atual_live} Equipes
+            </div>
+            ''', unsafe_allow_html=True)
 
             if not task_files and not saneamento_files: 
                 st.info("Aguardando upload de obras na Base Levantamento ou Base Saneamento.")
@@ -1314,9 +1353,6 @@ def view_roteirizador():
             
             df_unallocated = df_tasks[df_tasks['BASE_ATRIBUIDA'] == "NÃO ALOCADO"]
             df_tasks_alocadas = df_tasks[df_tasks['BASE_ATRIBUIDA'] != "NÃO ALOCADO"].copy()
-
-            tot_unallocated = sum(len(r['_ORIGINAL_ROWS']) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1 for _, r in df_unallocated.iterrows())
-            st.session_state.tot_obras_nao_alocadas = tot_unallocated
 
             if df_tasks_alocadas.empty: 
                 st.error("Nenhuma obra encontrou equipes com cobertura geográfica. Verifique as configurações de base e municípios.")
