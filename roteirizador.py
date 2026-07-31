@@ -1495,6 +1495,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
             
         progress_bar = st.progress(0.0)
         status_text = st.empty()
+        timer_placeholder = st.empty() # <-- CORREÇÃO: Variável do relógio recolocada aqui
         
         df_routed = st.session_state.df_routed
         data_atual_formatada = datetime.now().strftime("%d.%m.%Y")
