@@ -558,10 +558,19 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         pop_header_bg = "#FFD700"
                         pop_header_color = "#000000"
                         pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
+                        nome_ponto = f"[PRIORIDADE] [{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}" if r.get('PRIORIDADE') == "Sim" else f"[{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}"
+                        style_url = "#icon-yellow"
                     else:
                         pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
                         pop_header_color = "#ffffff"
                         pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
+                        prot_str = str(r.get('PROTOCOLO', 'N/A'))
+                        nome_obra = str(r.get('NOME', ''))
+                        if nome_obra.lower() == 'nan': nome_obra = ''
+                        separador = " - " if nome_obra else ""
+                        tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
+                        nome_ponto = f"{tag_prio}[{r.get('ORDEM', 0)}] Doc: {html.escape(prot_str)}{separador}{html.escape(nome_obra)}"
+                        style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
                     
                     dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
                     
@@ -781,31 +790,30 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
-            # === CÁLCULO DINÂMICO DE EQUIPES E PAINEL LATERAL ===
+            # === ATUALIZAÇÃO DA PONTE FANTASMA (SIDEBAR) EM TEMPO REAL ===
             qtd_eq_atual_live = len(levs_selecionados) + len(levs_temp_selecionados)
             st.session_state.qtd_equipes_ativas = qtd_eq_atual_live
             
-            if status_exec == "IDLE":
-                dias_mult_live = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
-                cap_por_eq_live = obras_por_dia * dias_mult_live * limite_periodos
-                cap_total_estimada_live = cap_por_eq_live * qtd_eq_atual_live
-                
-                sidebar_html_placeholder.markdown(f'''
-                <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block; margin-top: 10px;">Capacidade da Rota (Por Equipe):</label>
-                <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
-                    {cap_por_eq_live} Obras
-                </div>
-                
-                <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Equipes Selecionadas:</label>
-                <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
-                    {qtd_eq_atual_live} Equipes
-                </div>
-                
-                <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Quantidade Total:</label>
-                <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 5px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
-                    {cap_total_estimada_live} Obras
-                </div>
-                ''', unsafe_allow_html=True)
+            dias_mult_live = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
+            cap_por_eq_live = st.session_state.input_obras_por_dia * dias_mult_live * limite_periodos
+            cap_total_estimada_live = cap_por_eq_live * (qtd_eq_atual_live if qtd_eq_atual_live > 0 else 1)
+            
+            sidebar_html_placeholder.markdown(f'''
+            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block; margin-top: 10px;">Capacidade da Rota (Por Equipe):</label>
+            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
+                {cap_por_eq_live} Obras
+            </div>
+            
+            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Equipes Selecionadas:</label>
+            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
+                {qtd_eq_atual_live} Equipes
+            </div>
+            
+            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Quantidade Total:</label>
+            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 5px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
+                {cap_total_estimada_live} Obras
+            </div>
+            ''', unsafe_allow_html=True)
 
             if not task_files and not saneamento_files: 
                 st.info("Aguardando upload de obras na Base Levantamento ou Base Saneamento.")
@@ -1090,9 +1098,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
             
             df_unallocated = df_tasks[df_tasks['BASE_ATRIBUIDA'] == "NÃO ALOCADO"]
             df_tasks_alocadas = df_tasks[df_tasks['BASE_ATRIBUIDA'] != "NÃO ALOCADO"].copy()
-
-            tot_unallocated = sum(len(r['_ORIGINAL_ROWS']) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1 for _, r in df_unallocated.iterrows())
-            st.session_state.tot_obras_nao_alocadas = tot_unallocated
 
             if df_tasks_alocadas.empty: 
                 st.error("Nenhuma obra encontrou equipes com cobertura geográfica. Verifique as configurações de base e municípios.")
