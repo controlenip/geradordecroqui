@@ -738,14 +738,14 @@ def view_roteirizador():
             )
             
         with st.expander("⚙️ Esforço e Limites Diários", expanded=True):
-            tipo_periodo = st.radio("Agrupamento de percurso:", ["Dia", "Semana"], horizontal=True, disabled=is_locked)
-            dias_semana_selecionados = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"]
+            tipo_periodo = st.radio("Agrupamento de percurso:", ["Dia", "Semana"], index=1, horizontal=True, disabled=is_locked)
             
+            dias_semana_selecionados = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta"]
             if tipo_periodo == "Semana":
                 dias_semana_selecionados = st.multiselect(
                     "Dias úteis na semana:",
                     ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"],
-                    default=["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"],
+                    default=["Segunda", "Terça", "Quarta", "Quinta", "Sexta"],
                     disabled=is_locked
                 )
                 if not dias_semana_selecionados:
@@ -753,26 +753,14 @@ def view_roteirizador():
                 else:
                     st.caption(f"ℹ️ Cada semana terá **{len(dias_semana_selecionados)} dias** alocados.")
                 
-            tem_san = bool(st.session_state.get('san_uploader'))
-            modo_limite_opcoes = ["Quantidade Fixa de Obras", "Carga Horária (Tempo Real)", "Saneamento (Forçar Quota / 24h)"]
-            idx_padrao = 2 if tem_san else 0
+            st.info("⚡ **Quota Matemática Exata Ativada:** A IA ignorará qualquer limite de horas no dia ou distância em KM para garantir que o Levantador receba exatamente a quantidade de obras solicitada abaixo.")
             
-            modo_limite = st.radio("Critério limitador:", modo_limite_opcoes, index=idx_padrao, disabled=is_locked)
-            limite_km_diario = st.slider("Limite de KM por Dia", 0, 500, 500, 5, disabled=is_locked)
+            obras_por_dia = st.number_input("Obras Previstas por Dia", min_value=1, value=30, step=1, disabled=is_locked)
+            limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
             
-            if modo_limite in ["Quantidade Fixa de Obras", "Saneamento (Forçar Quota / 24h)"]:
-                obras_por_dia = st.number_input("Obras Previstas por Dia", min_value=1, value=30, step=1, disabled=is_locked)
-                limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
-                tempo_medio_obra = 1.5
-                velocidade_media_kmh = 30.0
-                horas_por_dia = 24.0 if modo_limite == "Saneamento (Forçar Quota / 24h)" else 8.0
-            else:
-                horas_por_dia = st.number_input("Horas por Dia", min_value=1.0, value=8.0, step=0.5, disabled=is_locked)
-                tempo_medio_obra = st.number_input("Tempo de execução/obra (Horas)", min_value=0.1, value=1.5, step=0.1, disabled=is_locked)
-                velocidade_media_kmh = st.number_input("Velocidade (km/h)", min_value=10.0, value=30.0, step=5.0, disabled=is_locked)
-                limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
-                obras_por_dia = int(horas_por_dia / tempo_medio_obra)
-                if obras_por_dia < 1: obras_por_dia = 1
+            # Variáveis puramente cosméticas para gerar horário nos cards (não limitam nada)
+            tempo_medio_obra = 1.5
+            velocidade_media_kmh = 30.0
 
         with st.expander("💰 Custos e Gestão Financeira", expanded=False):
             custo_combustivel = st.number_input("Custo Combustível (R$/L)", min_value=0.0, value=0.0, step=0.1, disabled=is_locked)
@@ -785,7 +773,6 @@ def view_roteirizador():
             
         st.markdown("---")
         
-        # Espaço reservado (Placeholder) para injetar o painel dinâmico depois dos cálculos
         sidebar_html_placeholder = st.empty()
         
         st.markdown("### 📥 Ações e Arquivos")
@@ -829,7 +816,7 @@ def view_roteirizador():
                 is_saneamento_puro = True
 
         if 'tot_obras_nao_alocadas' in st.session_state and st.session_state.tot_obras_nao_alocadas > 0:
-            st.warning(f"⚠️ **CAPACIDADE ATINGIDA:** {st.session_state.tot_obras_nao_alocadas} obras ficaram de fora. **DICA:** Para roteirizar todas as obras, vá no menu lateral esquerdo ('Esforço e Limites Diários') e aumente o número de 'Obras Previstas por Dia' ou o 'Limite total de Dias/Semanas'.")
+            st.warning(f"⚠️ **CAPACIDADE MATEMÁTICA ATINGIDA:** {st.session_state.tot_obras_nao_alocadas} obras da planilha foram ignoradas e deixadas de fora do roteamento para não estourar o limite exato que você configurou de Obras x Equipes.")
 
         c_m1, c_m2, c_m3, c_m4 = st.columns(4)
         c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #0D256C;"><div class="metric-icon" style="background: rgba(13, 37, 108, 0.12);">🎯</div><div class="metric-content"><div class="metric-title">TOTAL DE OBRAS ROTEIRIZADAS</div><div class="metric-value">{tot_obras_reais} <span style="font-size:12px;color:#888;">(Em {tot_paradas} Pontos)</span></div></div></div>', unsafe_allow_html=True)
@@ -840,6 +827,56 @@ def view_roteirizador():
             c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #eab308;"><div class="metric-icon" style="background: rgba(234, 179, 8, 0.15);">🏢</div><div class="metric-content"><div class="metric-title">Pontos Agrupados (Super Pontos)</div><div class="metric-value">{tot_super_pontos}</div></div></div>', unsafe_allow_html=True)
         else:
             c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">🚨</div><div class="metric-content"><div class="metric-title">Prioridades</div><div class="metric-value">{tot_prio}</div></div></div>', unsafe_allow_html=True)
+
+        cfg_atual = st.session_state.vrp_state.get('config', {})
+        obras_dia_meta = cfg_atual.get('obras_por_dia', 30)
+        limite_periodos_meta = cfg_atual.get('limite_periodos', 5)
+        tipo_periodo_meta = cfg_atual.get('tipo_periodo', 'Dia')
+        
+        dias_multiplicador = len(cfg_atual.get('dias_selecionados', [])) if tipo_periodo_meta == "Semana" else 1
+        
+        meta_exata_por_equipe = obras_dia_meta * dias_multiplicador * limite_periodos_meta
+        tot_equipes_cadastradas = len(st.session_state.bases_records)
+        meta_global_exata = meta_exata_por_equipe * tot_equipes_cadastradas
+        
+        obras_por_equipe = {b['LEVANTADOR']: 0 for b in st.session_state.bases_records}
+            
+        for _, r in df_real_tasks.iterrows():
+            b_name = r['BASE_ATRIBUIDA']
+            qtd = len(r.get('_ORIGINAL_ROWS', [1])) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1
+            if b_name in obras_por_equipe:
+                obras_por_equipe[b_name] += qtd
+                
+        equipes_abaixo_meta = {k: v for k, v in obras_por_equipe.items() if v < meta_exata_por_equipe}
+        
+        st.markdown(f'''
+        <div style="background-color: #f8fafc; color: #0f172a; padding: 15px; border-left: 5px solid #3b82f6; margin-bottom: 20px; border-radius: 4px; border: 1px solid #e2e8f0;">
+            <h4 style="margin-top: 0; color: #1e3a8a;">📊 Auditoria Matemática Exata: {obras_dia_meta} obras/dia × {dias_multiplicador * limite_periodos_meta} dias totais × {tot_equipes_cadastradas} equipes = {meta_global_exata} obras projetadas</h4>
+            <p style="margin-bottom: 10px;">O sistema rodou no modo matemático puro e ignorou bloqueios de tempo/distância. <b>Total Roteirizado: {tot_obras_reais} obras.</b></p>
+        ''', unsafe_allow_html=True)
+        
+        if equipes_abaixo_meta:
+            motivos = []
+            if tot_obras_reais < meta_global_exata:
+                motivos.append(f"<b>Planilha menor que a Capacidade ou Isolamento Geográfico:</b> A matemática abriu vaga para {meta_global_exata} obras. O sistema alocou {tot_obras_reais}. O que faltou é porque sua planilha acabou ou essas cidades são muito distantes da base para as regras territoriais configuradas.")
+                
+            detalhes_html = "".join([f"<li style='margin-bottom: 4px;'><b>{eq}</b>: Roteirizou {qtd} obras (Vaga para: {meta_exata_por_equipe}).</li>" for eq, qtd in equipes_abaixo_meta.items()])
+            
+            st.markdown(f'''
+                <ul style="margin-bottom: 15px; color: #b91c1c;">
+                    {"".join([f"<li style='margin-bottom: 5px;'>{m}</li>" for m in motivos])}
+                </ul>
+                <details>
+                    <summary style="cursor: pointer; font-weight: bold; padding: 5px; background: rgba(0,0,0,0.05); border-radius: 4px;">Ver Levantadores que ficaram abaixo da capacidade máxima ({len(equipes_abaixo_meta)} equipes)</summary>
+                    <ul style="margin-top: 10px;">
+                        {detalhes_html}
+                    </ul>
+                </details>
+            ''', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<p style="color: #15803d; font-weight: bold;">✅ Alocação Exata Perfeita! 100% da cota que você escolheu foi preenchida na vírgula.</p>', unsafe_allow_html=True)
+            
+        st.markdown('</div>', unsafe_allow_html=True)
 
         cf_comb = st.session_state.config_financeira.get('custo_combustivel', 0.0)
         cf_cons = st.session_state.config_financeira.get('consumo_veiculo', 0.0)
@@ -1144,14 +1181,7 @@ def view_roteirizador():
             st.session_state.qtd_equipes_ativas = qtd_eq_atual_live
             
             dias_multiplier = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
-            
-            if modo_limite == "Quantidade Fixa de Obras" or modo_limite == "Saneamento (Forçar Quota / 24h)":
-                obras_dia_est = obras_por_dia
-            else:
-                obras_dia_est = int(horas_por_dia / tempo_medio_obra) if tempo_medio_obra > 0 else 1
-                if obras_dia_est < 1: obras_dia_est = 1
-                
-            cap_por_eq_live = obras_dia_est * dias_multiplier * limite_periodos
+            cap_por_eq_live = obras_por_dia * dias_multiplier * limite_periodos
             cap_total_estimada_live = cap_por_eq_live * (qtd_eq_atual_live if qtd_eq_atual_live > 0 else 1)
             
             # --- 1ª RENDERIZAÇÃO DO PAINEL LATERAL: Inicial, sem obras ainda
@@ -1327,7 +1357,7 @@ def view_roteirizador():
 
         if df_tasks.empty: return
 
-        # === ALOCAÇÃO TERRITORIAL (MÓDULO DE ALTA VELOCIDADE) ===
+        # === ALOCAÇÃO TERRITORIAL (MÓDULO DE ALTA VELOCIDADE EXATA) ===
         df_tasks_alocadas = pd.DataFrame()
         bases_principais_records = df_bases.to_dict('records') if not df_bases.empty else []
         bases_temporarias_records = df_bases_temp.to_dict('records') if not df_bases_temp.empty else []
@@ -1366,7 +1396,8 @@ def view_roteirizador():
 
             base_counts = {b['LEVANTADOR']: 0 for b in todas_bases_records}
             
-            max_capacity = obras_dia_est * dias_multiplier * limite_periodos
+            # Limite exato por Levantador
+            max_capacity = obras_por_dia * dias_multiplier * limite_periodos
 
             def assign_load_balanced(df_sub, allowed_bases, is_prio=False):
                 if df_sub.empty or not allowed_bases: return pd.DataFrame(), df_sub.copy()
@@ -1396,14 +1427,11 @@ def view_roteirizador():
                     if pd.notna(lat) and pd.notna(lon):
                         for b in valid_bases:
                             b_name = b['LEVANTADOR']
+                            # Garante que a equipe jamais passará do limite exato imposto
                             if base_counts[b_name] + qtd_real <= max_capacity:
                                 b_lat, b_lon = b.get('LATITUDE'), b.get('LONGITUDE')
                                 if pd.notna(b_lat) and pd.notna(b_lon):
                                     d = haversine_scalar(lat, lon, float(b_lat), float(b_lon))
-                                    
-                                    if tipo_atribuicao == "Por Proximidade Geográfica das Coordenadas (Ignora texto)" and d > 100.0:
-                                        continue 
-                                        
                                     if d < best_dist:
                                         best_dist = d
                                         best_base = b_name
@@ -1442,7 +1470,6 @@ def view_roteirizador():
 
             if df_tasks_alocadas.empty: 
                 st.error("Nenhuma obra encontrou equipes com cobertura geográfica ou com limite diário disponível.")
-                if tot_unallocated > 0: st.warning(f"⚠️ {tot_unallocated} obras ficaram de fora e não puderam ser roteirizadas. Aumente o Limite de Semanas/Dias na configuração ou adicione novos Levantadores na planilha.")
                 return
                 
             bases_records = todas_bases_records 
@@ -1467,9 +1494,6 @@ def view_roteirizador():
 
         if st.button("🚀 Iniciar Motor de Roteirização (OR-Tools)", type="primary", use_container_width=True):
             if df_tasks_alocadas.empty: st.error("Selecione equipes válidas."); return
-            if tipo_periodo == "Semana" and not dias_semana_selecionados:
-                st.error("Selecione os dias da semana na barra lateral antes de continuar.")
-                return
 
             st.session_state.tarefas_alocadas_inicialmente = len(df_tasks_alocadas)
             st.session_state.bases_records = bases_records
@@ -1485,9 +1509,11 @@ def view_roteirizador():
             
             st.session_state.vrp_state = {
                 'config': {
-                    'modo_limite': modo_limite, 'velocidade_media_kmh': velocidade_media_kmh,
-                    'tempo_medio_obra': tempo_medio_obra, 'horas_por_dia': horas_por_dia, 'limite_km_diario': limite_km_diario,
-                    'obras_por_dia': obras_por_dia, 'tipo_periodo': tipo_periodo, 'limite_periodos': limite_periodos,
+                    'velocidade_media_kmh': velocidade_media_kmh,
+                    'tempo_medio_obra': tempo_medio_obra, 
+                    'obras_por_dia': obras_por_dia, 
+                    'tipo_periodo': tipo_periodo, 
+                    'limite_periodos': limite_periodos,
                     'dias_selecionados': dias_semana_selecionados,
                     'url_osrm_base': url_osrm_base
                 },
@@ -1656,14 +1682,9 @@ def view_roteirizador():
                         
                         virar_dia = False
                         
-                        if cfg['modo_limite'] != "Saneamento (Forçar Quota / 24h)":
-                            if fim_previsto.hour >= 18 or fim_previsto.date() > estado['time'].date():
-                                virar_dia = True
-                            
-                        if cfg['modo_limite'] in ["Quantidade Fixa de Obras", "Saneamento (Forçar Quota / 24h)"] and obras_no_periodo_macro >= cfg['obras_por_dia']:
-                            virar_dia = True
-                            
-                        if estado.get('km_hoje', 0.0) + viagem_km > cfg.get('limite_km_diario', 500):
+                        # AQUI ESTÁ A CHAVE DA EXATIDÃO MATEMÁTICA
+                        # O dia só vira unica e exclusivamente quando bater a cota exata (ex: 30)
+                        if obras_no_periodo_macro >= cfg['obras_por_dia']:
                             virar_dia = True
                                 
                         if virar_dia:
