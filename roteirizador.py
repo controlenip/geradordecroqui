@@ -548,12 +548,10 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         continue
 
                     is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
-                    if is_super:
-                        cor_icone = 'orange'
-                    else:
-                        cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
+                    tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
                     
                     if is_super:
+                        cor_icone = 'orange'
                         qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
                         pop_header_bg = "#FFD700"
                         pop_header_color = "#000000"
@@ -561,6 +559,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         nome_ponto = f"[PRIORIDADE] [{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}" if r.get('PRIORIDADE') == "Sim" else f"[{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}"
                         style_url = "#icon-yellow"
                     else:
+                        cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
                         pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
                         pop_header_color = "#ffffff"
                         pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
@@ -576,6 +575,299 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     
                     extra_rows_list = []
                     for c in cols_exibir:
+                        if c.upper() != 'PROTOCOLO' and c.upper() != 'NOME_DIA':
+                            val_html = formata_campo_html(r.get(c, ''))
+                            extra_rows_list.append(f"<tr><td style='padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:4px 8px; color:#222; border-bottom:1px solid #eee;'>{val_html}</td></tr>")
+                    extra_rows = "".join(extra_rows_list)
+
+                    prot_html = formata_campo_html(r.get('PROTOCOLO', 'N/A'))
+
+                    popup_html = f"""
+                    <div style="font-family: Arial, sans-serif; width:320px; border-radius:6px; overflow:hidden; border:1px solid #ccc; background:#fff;">
+                        <div style="background:{pop_header_bg}; color:{pop_header_color}; padding:10px; font-size:14px; font-weight:bold; text-align:center;">{pop_prio_txt}</div>
+                        <div style="padding:10px; background:#fafafa; font-size:13px;">
+                            <table style="width:100%; border-collapse:collapse; text-align:left;">
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{prot_html}</td></tr>
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Ordem:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Horário:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Ant.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                                <tr><td style="padding:4px 8px; font-weight:bold; color:#444; border-bottom:1px solid #eee;">Distância Próx.:</td><td style="padding:4px 8px; color:#222; border-bottom:1px solid #eee;">{dist_prox} KM</td></tr>
+                                {extra_rows}
+                            </table>
+                        </div>
+                    </div>"""
+
+                    kml_lines.append(f'        <Placemark><name>{nome_ponto}</name><description><![CDATA[{popup_html}]]></description><styleUrl>{style_url}</styleUrl><Point><coordinates>{lon},{lat},0</coordinates></Point></Placemark>')
+                    
+                    geometria = r.get('ROTA_GEOMETRIA')
+                    if isinstance(geometria, list):
+                        coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
+                    else:
+                        coords_linha_kml.append(f"          {lon},{lat},0")
+
+                kml_str_coords = "\n".join(coords_linha_kml)
+                if kml_str_coords.strip():
+                    kml_lines.append(f'        <Placemark><name>Contorno Rota</name><styleUrl>#linha-rota-contorno</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{kml_str_coords}\n            </coordinates></LineString></Placemark>')
+                    kml_lines.append(f'        <Placemark><name>Traçado Rota</name><styleUrl>#rota-centro-{nome_limpo_base}</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{kml_str_coords}\n            </coordinates></LineString></LineString></Placemark>\n      </Folder>')
+                else:
+                    kml_lines.append('      </Folder>')
+            kml_lines.append('    </Folder>')
+        kml_lines.append('  </Folder>')
+    kml_lines.append('</Document>\n</kml>')
+    return "\n".join(kml_lines)
+
+# ==========================================
+# 7. TELA PRINCIPAL (UI STREAMLIT)
+# ==========================================
+def view_roteirizador():
+    if "roteamento_concluido" not in st.session_state: st.session_state.roteamento_concluido = False
+    if "vrp_status" not in st.session_state: st.session_state.vrp_status = "IDLE"
+    if "vrp_state" not in st.session_state: st.session_state.vrp_state = {}
+    if "df_routed" not in st.session_state: st.session_state.df_routed = pd.DataFrame()
+    if "bases_records" not in st.session_state: st.session_state.bases_records = []
+    if "colunas_exibir" not in st.session_state: st.session_state.colunas_exibir = []
+    if "col_prioridade" not in st.session_state: st.session_state.col_prioridade = "TIPO NOTA"
+    if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
+    if "show_capacity_modal" not in st.session_state: st.session_state.show_capacity_modal = False
+    if "input_obras_por_dia" not in st.session_state: st.session_state.input_obras_por_dia = 30
+
+    status_exec = st.session_state.vrp_status
+    is_done = st.session_state.roteamento_concluido
+
+    # TRATAMENTO DO POP-UP MODAL TIPO WHATSAPP
+    if st.session_state.get('show_capacity_modal', False):
+        st.markdown("""
+        <style>
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) {
+            position: fixed !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            background-color: #ffffff !important;
+            border: 1px solid #e0e0e0 !important;
+            padding: 24px !important;
+            border-radius: 16px !important;
+            z-index: 999999 !important;
+            width: 350px !important;
+            text-align: left !important;
+            box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.15) !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) h3 {
+            color: #d9534f !important;
+            font-size: 1.1rem !important;
+            margin-bottom: 10px !important;
+            border-bottom: 1px solid #eee !important;
+            padding-bottom: 10px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) p {
+            color: #333333 !important;
+            margin-bottom: 8px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) button {
+            background-color: #f8f9fa !important;
+            color: #d9534f !important;
+            font-weight: bold !important;
+            border: 1px solid #ddd !important;
+            margin-top: 15px !important;
+            padding: 8px 12px !important;
+            border-radius: 8px !important;
+            width: 100% !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(div.cap-modal-marker) button:hover {
+            background-color: #f1f3f5 !important;
+            border-color: #ccc !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        with st.container(border=False):
+            st.markdown('<div class="cap-modal-marker"></div>', unsafe_allow_html=True)
+            st.markdown("### ⚠️ Excesso de Capacidade")
+            st.markdown(f"<p style='font-size:14px;'>A cota roteiriza até <b>{st.session_state.cap_total_check}</b> obras, mas há <b>{st.session_state.tot_obras_aprovadas}</b> obras válidas prontas na fila.</p>", unsafe_allow_html=True)
+            st.markdown("<p style='font-size:13px; color:#666;'>Reajuste o Limite Diário na barra lateral para aproximar o cálculo.</p>", unsafe_allow_html=True)
+            
+            if st.button("✖ Fechar e Zerar Cota", use_container_width=True):
+                st.session_state.input_obras_por_dia = 0
+                st.session_state.show_capacity_modal = False
+                tentar_rerun()
+        st.stop()
+
+    st.markdown("<h1 class='brand-title'>Plataforma Roteirizadora NIP v1.1</h1>", unsafe_allow_html=True)
+
+    # ---------------------------------------------------------
+    # UI DE NAVEGAÇÃO E SIDEBAR (SEMPRE VISÍVEL)
+    # ---------------------------------------------------------
+    s1_class = "step-item done" if (status_exec != "IDLE" or is_done) else "step-item active"
+    s2_class = "step-item done" if (status_exec != "IDLE" or is_done) else "step-item active"
+    s3_class = "step-item active" if status_exec in ["RUNNING", "PACKAGING"] else ("step-item done" if is_done else "step-item")
+    s4_class = "step-item active" if is_done else "step-item"
+    
+    st.markdown(f"""
+    <div class="stepper-container">
+        <div class="{s1_class}">📁 1. Dados e Profiling</div>
+        <div class="{s2_class}">⚙️ 2. Filtros Dinâmicos</div>
+        <div class="{s3_class}">🚀 3. IA VRP OR-Tools</div>
+        <div class="{s4_class}">🎯 4. Resultados</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    is_locked = status_exec != "IDLE" or is_done
+    
+    with st.sidebar:
+        if os.path.exists(LOGO_PATH):
+            with open(LOGO_PATH, "rb") as f:
+                encoded_logo = base64.b64encode(f.read()).decode()
+            st.markdown(
+                f'<div style="text-align: center; margin-bottom: 25px;">'
+                f'<img src="data:image/png;base64,{encoded_logo}" style="width: 70%; max-width: 180px; pointer-events: none;">'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+            
+        with st.expander("⚙️ Esforço e Limites", expanded=True):
+            tipo_periodo = st.radio("Agrupamento de percurso:", ["Dia", "Semana"], horizontal=True, disabled=is_locked)
+            dias_semana_selecionados = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"]
+            
+            if tipo_periodo == "Semana":
+                dias_semana_selecionados = st.multiselect(
+                    "Dias úteis na semana:",
+                    ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"],
+                    default=["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"],
+                    disabled=is_locked
+                )
+                if not dias_semana_selecionados:
+                    st.warning("⚠️ Selecione pelo menos 1 dia da semana para o cálculo.")
+                
+            obras_por_dia = st.number_input("Cota Diária de Obras (Por Equipe)", min_value=0, step=1, disabled=is_locked, key="input_obras_por_dia")
+            limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
+            
+            dias_mult_live = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
+            cap_por_eq_live = obras_por_dia * dias_mult_live * limite_periodos
+            
+            st.markdown(f'''
+            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block; margin-top: 10px;">Capacidade da Rota (Por Equipe):</label>
+            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
+                {cap_por_eq_live} Obras
+            </div>
+            ''', unsafe_allow_html=True)
+            
+        with st.expander("📡 Conexão de Rede (Avançado)", expanded=False):
+            url_osrm_base = st.text_input("Endpoint OSRM ⚠️ (NÃO APAGUE OU EDITE):", value="http://router.project-osrm.org", disabled=is_locked)
+            st.caption("Este link conecta o sistema à malha viária real de ruas do mundo.")
+            
+        st.markdown("---")
+        timer_placeholder = st.empty()
+        
+        st.markdown("### 📥 Ações e Arquivos")
+        data_atual_formatada = datetime.now().strftime("%d.%m.%Y")
+        bytes_zip_xl = st.session_state.get('bytes_zip_xl', b"")
+        bytes_zip_kml = st.session_state.get('bytes_zip_kml', b"")
+        
+        botoes_desabilitados = not is_done or st.session_state.df_routed.empty
+        
+        st.download_button("🌐 1. Baixar Planilhas (ZIP)", data=bytes_zip_xl if bytes_zip_xl else b"vazio", file_name=f"Planilhas_Equipes - {data_atual_formatada}.zip", mime="application/zip", use_container_width=True, disabled=botoes_desabilitados)
+        st.download_button("🗺️ 2. Baixar Mapas (KML)", data=bytes_zip_kml if bytes_zip_kml else b"vazio", file_name=f"Mapas_Rotas - {data_atual_formatada}.zip", mime="application/zip", use_container_width=True, disabled=botoes_desabilitados)
+        
+        if st.button("🧹 Nova Roteirização", type="primary", use_container_width=True, disabled=botoes_desabilitados): 
+            limpar_roteirizador()
+
+    # ---------------------------------------------------------
+    # ESTADO 4: RESULTADOS FINAIS (TELA DE SUCESSO)
+    # ---------------------------------------------------------
+    if is_done and not st.session_state.df_routed.empty:
+        st.markdown("## 🎯 Resultados da Otimização")
+
+        st.session_state.df_routed['DISTANCIA_PROXIMO_PONTO_KM'] = st.session_state.df_routed.groupby(['BASE_ATRIBUIDA', 'PERIODO'])['DISTANCIA_PONTO_ANTERIOR_KM'].shift(-1).fillna(0.0)
+
+        df_routed = st.session_state.df_routed.copy()
+        bases_records = st.session_state.bases_records
+        colunas_exibir = st.session_state.colunas_exibir
+        df_real_tasks = df_routed[~df_routed['PROTOCOLO'].isin(['RETORNO_BASE', 'PAUSA_ALMOCO'])]
+        
+        tot_paradas = len(df_real_tasks)
+        tot_obras_reais = sum(len(r['_ORIGINAL_ROWS']) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1 for _, r in df_real_tasks.iterrows())
+        
+        tot_equipes = df_routed['BASE_ATRIBUIDA'].nunique()
+        tot_km = f"{df_routed['DISTANCIA_PONTO_ANTERIOR_KM'].sum():.1f} km"
+        tot_prio = len(df_real_tasks[df_real_tasks['PRIORIDADE'] == 'Sim']) if 'PRIORIDADE' in df_real_tasks else 0
+        tot_super_pontos = len(df_real_tasks[df_real_tasks['SUPER_PONTO'].astype(str).str.startswith('SIM')]) if 'SUPER_PONTO' in df_real_tasks.columns else 0
+
+        is_saneamento_puro = False
+        if '_ORIGEM_BASE' in df_routed.columns:
+            origens = df_routed['_ORIGEM_BASE'].unique()
+            if 'SANEAMENTO' in origens and 'LEVANTAMENTO' not in origens:
+                is_saneamento_puro = True
+
+        if 'tot_obras_nao_alocadas' in st.session_state and st.session_state.tot_obras_nao_alocadas > 0:
+            st.warning(f"⚠️ **OBRAS SEM COBERTURA:** {st.session_state.tot_obras_nao_alocadas} obras não encontraram nenhuma equipe geograficamente compatível (verifique a regra de municípios).")
+
+        c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+        c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #0D256C;"><div class="metric-icon" style="background: rgba(13, 37, 108, 0.12);">🎯</div><div class="metric-content"><div class="metric-title">TOTAL DE OBRAS ROTEIRIZADAS</div><div class="metric-value">{tot_obras_reais} <span style="font-size:12px;color:#888;">(Em {tot_paradas} Pontos)</span></div></div></div>', unsafe_allow_html=True)
+        c_m2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👥</div><div class="metric-content"><div class="metric-title">Equipes Alocadas</div><div class="metric-value">{tot_equipes}</div></div></div>', unsafe_allow_html=True)
+        c_m3.markdown(f'<div class="metric-card" style="border-left: 5px solid #55B929;"><div class="metric-icon" style="background: rgba(85, 185, 41, 0.15);">🛣️</div><div class="metric-content"><div class="metric-title">KM Total Projetado</div><div class="metric-value">{tot_km}</div></div></div>', unsafe_allow_html=True)
+        
+        if is_saneamento_puro:
+            c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #eab308;"><div class="metric-icon" style="background: rgba(234, 179, 8, 0.15);">🏢</div><div class="metric-content"><div class="metric-title">Pontos Agrupados (Super Pontos)</div><div class="metric-value">{tot_super_pontos}</div></div></div>', unsafe_allow_html=True)
+        else:
+            c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">🚨</div><div class="metric-content"><div class="metric-title">Prioridades</div><div class="metric-value">{tot_prio}</div></div></div>', unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        st.markdown("### 🗺️ Mapa Geográfico de Rotas")
+        mapa = folium.Map(location=[df_routed['LATITUDE'].mean(), df_routed['LONGITUDE'].mean()], zoom_start=8) if not df_routed.empty else folium.Map(location=[-5.2, -45.0], zoom_start=7)
+        
+        cores_folium = ['#e6194b', '#00bcd4', '#3f51b5', '#009688', '#ff9800', '#9c27b0', '#cddc39', '#e91e63', '#ffeb3b', '#795548']
+        lista_bases_mapa = df_routed['BASE_ATRIBUIDA'].unique().tolist()
+        
+        heat_data = [[r['LATITUDE'], r['LONGITUDE']] for _, r in df_real_tasks.iterrows()]
+        HeatMap(heat_data, name="🔥 Mapa de Calor (Demandas)", radius=15, blur=10).add_to(mapa)
+        marker_cluster = MarkerCluster(name="Obras (Agrupadas)").add_to(mapa)
+        
+        for base_nome in lista_bases_mapa:
+            idx_cor = lista_bases_mapa.index(base_nome)
+            cor_rota = cores_folium[idx_cor % len(cores_folium)]
+            df_base_rota = df_routed[df_routed['BASE_ATRIBUIDA'] == base_nome]
+            base_ref = next((b for b in bases_records if b['LEVANTADOR'] == base_nome), None)
+            b_lat, b_lon = float(str(base_ref['LATITUDE']).replace(',','.')), float(str(base_ref['LONGITUDE']).replace(',','.'))
+            folium.Marker([b_lat, b_lon], icon=folium.Icon(color='black', icon='home', prefix='fa'), tooltip=f"Base: {base_nome}").add_to(mapa)
+            
+            fg_linhas = folium.FeatureGroup(name=f"Rota: {base_nome}", show=False)
+            
+            for periodo_val in df_base_rota['PERIODO'].unique():
+                df_periodo = df_base_rota[df_base_rota['PERIODO'] == periodo_val]
+                
+                pontos_linha_folium = []
+                for _, r in df_periodo.iterrows():
+                    if isinstance(r.get('ROTA_GEOMETRIA'), list):
+                        for lon, lat in r['ROTA_GEOMETRIA']: pontos_linha_folium.append([lat, lon]) 
+                            
+                folium.PolyLine(pontos_linha_folium, color='black', weight=7, opacity=0.9).add_to(fg_linhas)
+                folium.PolyLine(pontos_linha_folium, color=cor_rota, weight=3, opacity=1.0).add_to(fg_linhas)
+                
+                for r in df_periodo.to_dict('records'):
+                    if r.get('PROTOCOLO') in ['RETORNO_BASE', 'PAUSA_ALMOCO']: continue
+                    icone = identificar_icone_folium(r, df_routed.columns)
+                    
+                    is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
+                    if is_super:
+                        cor_icone = 'orange'
+                    else:
+                        cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
+                    
+                    if is_super:
+                        qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
+                        pop_header_bg = "#FFD700"
+                        pop_header_color = "#000000"
+                        pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
+                    else:
+                        pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
+                        pop_header_color = "#ffffff"
+                        pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
+                    
+                    dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
+                    
+                    extra_rows_list = []
+                    for c in colunas_exibir:
                         if c.upper() != 'PROTOCOLO' and c.upper() != 'NOME_DIA':
                             val_html = formata_campo_html(r.get(c, ''))
                             extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
@@ -687,7 +979,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         opcoes_levs = sorted([str(x) for x in df_bases_temp_ui['LEVANTADOR'].dropna().unique().tolist() if str(x).upper().strip() != 'SEM LEVANTADOR'])
                         
                         levs_selecionados = st.multiselect("Selecione as Equipes Principais:", opcoes_levs, default=opcoes_levs)
-                        st.session_state.temp_eq_princ = levs_selecionados
                         
                         if levs_selecionados:
                             df_bases = df_bases_temp_ui[df_bases_temp_ui['LEVANTADOR'].isin(levs_selecionados)].copy()
@@ -762,7 +1053,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         opcoes_levs_temp = sorted([str(x) for x in df_bases_temp_full['LEVANTADOR'].dropna().unique().tolist() if str(x).upper().strip() != 'SEM LEVANTADOR'])
                         
                         levs_temp_selecionados = st.multiselect("Selecione as Equipes:", opcoes_levs_temp, default=opcoes_levs_temp)
-                        st.session_state.temp_eq_apoio = levs_temp_selecionados
                         
                         if levs_temp_selecionados:
                             df_bases_temp = df_bases_temp_full[df_bases_temp_full['LEVANTADOR'].isin(levs_temp_selecionados)].copy()
@@ -788,33 +1078,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                             df_bases_temp['TIPO_EQUIPE'] = 'TEMPORARIA'
                 except Exception as e:
                     st.error(f"Erro: {e}")
-
-            # === CÁLCULO DINÂMICO DE EQUIPES E PAINEL LATERAL ===
-            qtd_eq_princ = len(st.session_state.get('temp_eq_princ', []))
-            qtd_eq_temp = len(st.session_state.get('temp_eq_apoio', []))
-            qtd_eq_atual_live = qtd_eq_princ + qtd_eq_temp
-            st.session_state.qtd_equipes_ativas = qtd_eq_atual_live
-            
-            dias_mult_live = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
-            cap_por_eq_live = st.session_state.input_obras_por_dia * dias_mult_live * limite_periodos
-            cap_total_estimada_live = cap_por_eq_live * (qtd_eq_atual_live if qtd_eq_atual_live > 0 else 1)
-            
-            sidebar_html_placeholder.markdown(f'''
-            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block; margin-top: 10px;">Capacidade da Rota (Por Equipe):</label>
-            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
-                {cap_por_eq_live} Obras
-            </div>
-            
-            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Equipes Selecionadas:</label>
-            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
-                {qtd_eq_atual_live} Equipes
-            </div>
-            
-            <label style="font-size: 14px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block;">Quantidade Total:</label>
-            <div style="background-color: #f0f2f6; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; margin-bottom: 5px; color: #d9534f; font-weight: 900; font-size: 15px; cursor: not-allowed; text-align: center;">
-                {cap_total_estimada_live} Obras
-            </div>
-            ''', unsafe_allow_html=True)
 
             if not task_files and not saneamento_files: 
                 st.info("Aguardando upload de obras na Base Levantamento ou Base Saneamento.")
@@ -1099,9 +1362,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
             
             df_unallocated = df_tasks[df_tasks['BASE_ATRIBUIDA'] == "NÃO ALOCADO"]
             df_tasks_alocadas = df_tasks[df_tasks['BASE_ATRIBUIDA'] != "NÃO ALOCADO"].copy()
-
-            tot_unallocated = sum(len(r['_ORIGINAL_ROWS']) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1 for _, r in df_unallocated.iterrows())
-            st.session_state.tot_obras_nao_alocadas = tot_unallocated
 
             if df_tasks_alocadas.empty: 
                 st.error("Nenhuma obra encontrou equipes com cobertura geográfica. Verifique as configurações de base e municípios.")
