@@ -137,6 +137,7 @@ def limpar_roteirizador():
     st.session_state.col_prioridade = "TIPO NOTA"
     st.session_state.colunas_originais = []
     st.session_state.show_capacity_modal = False
+    st.session_state.qtd_equipes_ativas = 0
     if 'bytes_zip_xl' in st.session_state: del st.session_state['bytes_zip_xl']
     if 'bytes_zip_kml' in st.session_state: del st.session_state['bytes_zip_kml']
     ler_planilha_cached.clear()
@@ -550,6 +551,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
                     
                     if is_super:
+                        cor_icone = 'orange'
                         qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
                         pop_header_bg = "#FFD700"
                         pop_header_color = "#000000"
@@ -626,6 +628,7 @@ def view_roteirizador():
     if "col_prioridade" not in st.session_state: st.session_state.col_prioridade = "TIPO NOTA"
     if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
     if "show_capacity_modal" not in st.session_state: st.session_state.show_capacity_modal = False
+    if "qtd_equipes_ativas" not in st.session_state: st.session_state.qtd_equipes_ativas = 0
 
     status_exec = st.session_state.vrp_status
     is_done = st.session_state.roteamento_concluido
@@ -644,7 +647,7 @@ def view_roteirizador():
             padding: 24px !important;
             border-radius: 16px !important;
             z-index: 999999 !important;
-            width: 350px !important;
+            width: 380px !important;
             text-align: left !important;
             box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.15) !important;
         }
@@ -739,6 +742,18 @@ def view_roteirizador():
                 
             obras_por_dia = st.number_input("Cota Diária de Obras (Por Equipe)", min_value=0, step=1, disabled=is_locked, key="input_obras_por_dia")
             limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
+            
+            dias_mult = len(dias_semana_selecionados) if tipo_periodo == 'Semana' else 1
+            qtd_eq = st.session_state.get('qtd_equipes_ativas', 0)
+            
+            if qtd_eq > 0:
+                cap_total_estimada = obras_por_dia * dias_mult * limite_periodos * qtd_eq
+                txt_cap = f"{cap_total_estimada} obras totais ({qtd_eq} equipes)"
+            else:
+                cap_total_estimada = obras_por_dia * dias_mult * limite_periodos
+                txt_cap = f"{cap_total_estimada} obras (Por equipe)"
+                
+            st.text_input("Capacidade Calculada:", value=txt_cap, disabled=True)
             
         with st.expander("📡 Conexão de Rede (Avançado)", expanded=False):
             url_osrm_base = st.text_input("Endpoint OSRM ⚠️ (NÃO APAGUE OU EDITE):", value="http://router.project-osrm.org", disabled=is_locked)
@@ -1251,6 +1266,8 @@ def view_roteirizador():
         
         if len(todas_bases_records) > 0:
             
+            st.session_state.qtd_equipes_ativas = len(todas_bases_records)
+            
             df_tasks['BASE_ATRIBUIDA'] = "NÃO ALOCADO"
             
             df_tasks['COORD_KEY'] = df_tasks['LATITUDE'].astype(str) + "_" + df_tasks['LONGITUDE'].astype(str)
@@ -1599,9 +1616,6 @@ def view_roteirizador():
                                     semana_atual += 1
                                     dia_da_semana = 1
                                     
-                            if cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']: break
-                            if cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']: break
-                                
                             estado = iniciar_dia(dia_absoluto)
                             
                             viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
@@ -1630,7 +1644,7 @@ def view_roteirizador():
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
 
-                    if estado['obras_hoje'] > 0 and not (cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']) and not (cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']):
+                    if estado['obras_hoje'] > 0:
                         dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
                         viagem_ret = (dist_ret / cfg['velocidade_media_kmh']) * 60
                         ret_fim = estado['time'] + pd.Timedelta(minutes=viagem_ret)
