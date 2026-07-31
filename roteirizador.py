@@ -484,7 +484,7 @@ def gerar_excel_resumo_bytes(df):
             for row_idx in range(2, len(df) + 2): ws.cell(row=row_idx, column=col_idx).alignment = col_align
     return buf_xl.getvalue()
 
-def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_todas_bases=None, tipo_periodo="Dia"):
+def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_todas_bases=None):
     if lista_todas_bases is None: lista_todas_bases = df_rota['BASE_ATRIBUIDA'].unique().tolist()
         
     kml_lines = [f'''<?xml version="1.0" encoding="UTF-8"?>
@@ -513,57 +513,251 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
         kml_lines.append(f'  <Folder>\n    <name>Levantador: {html.escape(str(base_nome))}</name>')
         kml_lines.append(f'    <Placemark><name>BASE: {html.escape(str(res_nome))}</name><styleUrl>#icon-green</styleUrl><Point><coordinates>{b_lon},{b_lat},0</coordinates></Point></Placemark>')
 
-        for semana in df_base['SEMANA'].unique():
-            df_semana = df_base[df_base['SEMANA'] == semana]
-            kml_lines.append(f'    <Folder>\n      <name>Semana {semana}</name>')
+        for dia in df_base['DIA'].unique():
+            df_dia = df_base[df_base['DIA'] == dia].copy().sort_values(by='ORDEM')
+            nome_dia_kml = df_dia.iloc[0].get('NOME_DIA', f"Dia {dia}") if not df_dia.empty else f"Dia {dia}"
+            
+            kml_lines.append(f'      <Folder>\n        <name>{nome_dia_kml}</name>')
+            coords_linha_kml = []
+            
+            for r in df_dia.to_dict('records'):
+                lon, lat = str(r.get('LONGITUDE')).replace(',','.'), str(r.get('LATITUDE')).replace(',','.')
+                
+                if r.get('PROTOCOLO') in ['RETORNO_BASE', 'PAUSA_ALMOCO']:
+                    geometria = r.get('ROTA_GEOMETRIA')
+                    if isinstance(geometria, list):
+                        coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
+                    else:
+                        coords_linha_kml.append(f"          {lon},{lat},0")
+                    continue
 
-            for dia in df_semana['DIA'].unique():
-                df_dia = df_semana[df_semana['DIA'] == dia].copy().sort_values(by='ORDEM')
-                nome_dia_kml = df_dia.iloc[0].get('NOME_DIA', f"Dia {dia}") if not df_dia.empty else f"Dia {dia}"
+                is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
+                if is_super:
+                    cor_icone = 'orange'
+                else:
+                    cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
                 
-                kml_lines.append(f'      <Folder>\n        <name>{nome_dia_kml}</name>')
-                coords_linha_kml = []
+                if is_super:
+                    qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
+                    pop_header_bg = "#FFD700"
+                    pop_header_color = "#000000"
+                    pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
+                    nome_ponto = f"[PRIORIDADE] [{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}" if r.get('PRIORIDADE') == "Sim" else f"[{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}"
+                    style_url = "#icon-yellow"
+                else:
+                    pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
+                    pop_header_color = "#ffffff"
+                    pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
+                    prot_str = str(r.get('PROTOCOLO', 'N/A'))
+                    nome_obra = str(r.get('NOME', ''))
+                    if nome_obra.lower() == 'nan': nome_obra = ''
+                    separador = " - " if nome_obra else ""
+                    tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
+                    nome_ponto = f"{tag_prio}[{r.get('ORDEM', 0)}] Doc: {html.escape(prot_str)}{separador}{html.escape(nome_obra)}"
+                    style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
                 
-                for r in df_dia.to_dict('records'):
-                    lon, lat = str(r.get('LONGITUDE')).replace(',','.'), str(r.get('LATITUDE')).replace(',','.')
+                dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
+                
+                extra_rows_list = []
+                for c in cols_exibir:
+                    if c.upper() != 'PROTOCOLO' and c.upper() != 'NOME_DIA':
+                        val_html = formata_campo_html(r.get(c, ''))
+                        extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
+                extra_rows = "".join(extra_rows_list)
+
+                prot_html = formata_campo_html(r.get('PROTOCOLO', 'N/A'))
+
+                popup_html = f"""
+                <div style="font-family:sans-serif; width:280px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
+                    <div style="background:{pop_header_bg}; color:{pop_header_color}; padding:8px 10px; font-size:13px; font-weight:bold;">{pop_prio_txt}</div>
+                    <div style="padding:10px; background:#fafafa; font-size:12px;">
+                        <table style="width:100%; border-collapse:collapse;">
+                            <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
+                            <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
+                            <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
+                            <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
+                            <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
+                            {extra_rows}
+                        </table>
+                    </div>
+                </div>"""
+                kml_lines.append(f'        <Placemark><name>{nome_ponto}</name><description><![CDATA[{popup_html}]]></description><styleUrl>{style_url}</styleUrl><Point><coordinates>{lon},{lat},0</coordinates></Point></Placemark>')
+                
+            kml_str_coords = "\n".join(coords_linha_kml)
+            kml_lines.append(f'        <Placemark><name>Traçado Rota</name><styleUrl>#rota-centro-{nome_limpo_base}</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{kml_str_coords}\n            </coordinates></LineString></Placemark>\n      </Folder>')
+    kml_lines.append('  </Folder>\n</Document>\n</kml>')
+    return "\n".join(kml_lines)
+
+# ==========================================
+# 7. TELA PRINCIPAL (UI STREAMLIT)
+# ==========================================
+def view_roteirizador():
+    if "roteamento_concluido" not in st.session_state: st.session_state.roteamento_concluido = False
+    if "vrp_status" not in st.session_state: st.session_state.vrp_status = "IDLE"
+    if "vrp_state" not in st.session_state: st.session_state.vrp_state = {}
+    if "df_routed" not in st.session_state: st.session_state.df_routed = pd.DataFrame()
+    if "bases_records" not in st.session_state: st.session_state.bases_records = []
+    if "colunas_exibir" not in st.session_state: st.session_state.colunas_exibir = []
+    if "col_prioridade" not in st.session_state: st.session_state.col_prioridade = "TIPO NOTA"
+    if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
+
+    status_exec = st.session_state.vrp_status
+    is_done = st.session_state.roteamento_concluido
+
+    # ---------------------------------------------------------
+    # ESTADO 4: RESULTADOS FINAIS (TELA DE SUCESSO)
+    # ---------------------------------------------------------
+    if is_done and not st.session_state.df_routed.empty:
+        st.markdown("<h1 class='brand-title'>Plataforma Roteirizadora NIP v1.1</h1>", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="stepper-container">
+            <div class="step-item done">📁 1. Dados e Profiling</div>
+            <div class="step-item done">⚙️ 2. Filtros Dinâmicos</div>
+            <div class="step-item done">🚀 3. IA VRP OR-Tools</div>
+            <div class="step-item active">🎯 4. Resultados e Custos</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.sidebar:
+            if os.path.exists(LOGO_PATH):
+                with open(LOGO_PATH, "rb") as f:
+                    encoded_logo = base64.b64encode(f.read()).decode()
+                st.markdown(
+                    f'<div style="text-align: center; margin-bottom: 25px;">'
+                    f'<img src="data:image/png;base64,{encoded_logo}" style="width: 70%; max-width: 180px; pointer-events: none;">'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+            
+            st.markdown("### 📥 Ações e Arquivos")
+            bytes_zip_xl = st.session_state.get('bytes_zip_xl', b"")
+            bytes_zip_kml = st.session_state.get('bytes_zip_kml', b"")
+            
+            st.download_button("🌐 1. Baixar Planilhas (ZIP)", data=bytes_zip_xl if bytes_zip_xl else b"vazio", file_name="Dados_Estruturados_Roteiro.zip", mime="application/zip", use_container_width=True)
+            st.download_button("🗺️ 2. Baixar Mapas (KML)", data=bytes_zip_kml if bytes_zip_kml else b"vazio", file_name="Mapas_KML.zip", mime="application/zip", use_container_width=True)
+            
+            if st.button("🧹 Limpar / Nova Roteirização", type="primary", use_container_width=True): 
+                limpar_roteirizador()
+
+        st.markdown("## 🎯 Resultados da Otimização")
+
+        st.session_state.df_routed['DISTANCIA_PROXIMO_PONTO_KM'] = st.session_state.df_routed.groupby(['BASE_ATRIBUIDA', 'PERIODO'])['DISTANCIA_PONTO_ANTERIOR_KM'].shift(-1).fillna(0.0)
+
+        df_routed = st.session_state.df_routed.copy()
+        bases_records = st.session_state.bases_records
+        colunas_exibir = st.session_state.colunas_exibir
+        df_real_tasks = df_routed[~df_routed['PROTOCOLO'].isin(['RETORNO_BASE', 'PAUSA_ALMOCO'])]
+        
+        tot_paradas = len(df_real_tasks)
+        tot_obras_reais = sum(len(r['_ORIGINAL_ROWS']) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1 for _, r in df_real_tasks.iterrows())
+        
+        tot_equipes = df_routed['BASE_ATRIBUIDA'].nunique()
+        tot_km = f"{df_routed['DISTANCIA_PONTO_ANTERIOR_KM'].sum():.1f} km"
+        tot_prio = len(df_real_tasks[df_real_tasks['PRIORIDADE'] == 'Sim']) if 'PRIORIDADE' in df_real_tasks else 0
+
+        c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+        c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #0D256C;"><div class="metric-icon" style="background: rgba(13, 37, 108, 0.12);">📌</div><div class="metric-content"><div class="metric-title">Obras Reais Processadas</div><div class="metric-value">{tot_obras_reais} <span style="font-size:12px;color:#888;">(Em {tot_paradas} Paradas)</span></div></div></div>', unsafe_allow_html=True)
+        c_m2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👥</div><div class="metric-content"><div class="metric-title">Equipes em Campo</div><div class="metric-value">{tot_equipes}</div></div></div>', unsafe_allow_html=True)
+        c_m3.markdown(f'<div class="metric-card" style="border-left: 5px solid #55B929;"><div class="metric-icon" style="background: rgba(85, 185, 41, 0.15);">🛣️</div><div class="metric-content"><div class="metric-title">KM Total Projetado</div><div class="metric-value">{tot_km}</div></div></div>', unsafe_allow_html=True)
+        c_m4.markdown(f'<div class="metric-card" style="border-left: 5px solid #ef4444;"><div class="metric-icon" style="background: rgba(239, 68, 68, 0.15);">🚨</div><div class="metric-content"><div class="metric-title">Grupos Prioritários</div><div class="metric-value">{tot_prio}</div></div></div>', unsafe_allow_html=True)
+
+        # --- INÍCIO DA AUDITORIA DE META EXATA ---
+        cfg_atual = st.session_state.vrp_state.get('config', {})
+        
+        obras_dia_meta = cfg_atual.get('obras_por_dia', 30)
+        limite_periodos_meta = cfg_atual.get('limite_periodos', 5)
+        
+        meta_exata_por_equipe = obras_dia_meta * limite_periodos_meta
+        tot_equipes_cadastradas = len(st.session_state.bases_records)
+        meta_global_exata = meta_exata_por_equipe * tot_equipes_cadastradas
+        
+        obras_por_equipe = {b['LEVANTADOR']: 0 for b in st.session_state.bases_records}
+            
+        for _, r in df_real_tasks.iterrows():
+            b_name = r['BASE_ATRIBUIDA']
+            qtd = len(r.get('_ORIGINAL_ROWS', [1])) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1
+            if b_name in obras_por_equipe:
+                obras_por_equipe[b_name] += qtd
+                
+        equipes_abaixo_meta = {k: v for k, v in obras_por_equipe.items() if v < meta_exata_por_equipe}
+        
+        st.markdown(f'''
+        <div style="background-color: #f8fafc; color: #0f172a; padding: 15px; border-left: 5px solid #3b82f6; margin-bottom: 20px; border-radius: 4px; border: 1px solid #e2e8f0;">
+            <h4 style="margin-top: 0; color: #1e3a8a;">📊 Auditoria Matemática: {obras_dia_meta} obras/dia × {limite_periodos_meta} dias × {tot_equipes_cadastradas} levantadores = {meta_global_exata} obras projetadas</h4>
+            <p style="margin-bottom: 10px;">O sistema foi configurado para ignorar barreiras de tempo/distância e buscar a cota exata. <b>Total Final Roteirizado: {tot_obras_reais} obras.</b></p>
+        ''', unsafe_allow_html=True)
+        
+        if equipes_abaixo_meta:
+            motivos = []
+            if tot_obras_reais < meta_global_exata:
+                motivos.append(f"<b>Falta de Demanda ou Gargalo Geográfico:</b> A matemática projetou {meta_global_exata} obras no total. No entanto, o sistema só conseguiu alocar {tot_obras_reais}. As {st.session_state.get('tot_obras_nao_alocadas', 0)} obras restantes (se houver) não puderam ser roteirizadas porque acabaram as obras na planilha ou elas estão em cidades bloqueadas pelas regras de distribuição territorial.")
+                
+            detalhes_html = "".join([f"<li style='margin-bottom: 4px;'><b>{eq}</b>: Roteirizou {qtd} obras (Meta Exata: {meta_exata_por_equipe}).</li>" for eq, qtd in equipes_abaixo_meta.items()])
+            
+            st.markdown(f'''
+                <ul style="margin-bottom: 15px; color: #b91c1c;">
+                    {"".join([f"<li style='margin-bottom: 5px;'>{m}</li>" for m in motivos])}
+                </ul>
+                <details>
+                    <summary style="cursor: pointer; font-weight: bold; padding: 5px; background: rgba(0,0,0,0.05); border-radius: 4px;">Ver Levantadores que ficaram abaixo da capacidade máxima ({len(equipes_abaixo_meta)} equipes)</summary>
+                    <ul style="margin-top: 10px;">
+                        {detalhes_html}
+                    </ul>
+                </details>
+            ''', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<p style="color: #15803d; font-weight: bold;">✅ Alocação Perfeita! 100% da cota exata foi preenchida para todos os levantadores.</p>', unsafe_allow_html=True)
+            
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("### 🗺️ Mapa Geográfico de Rotas")
+        mapa = folium.Map(location=[df_routed['LATITUDE'].mean(), df_routed['LONGITUDE'].mean()], zoom_start=8) if not df_routed.empty else folium.Map(location=[-5.2, -45.0], zoom_start=7)
+        
+        cores_folium = ['#e6194b', '#00bcd4', '#3f51b5', '#009688', '#ff9800', '#9c27b0', '#cddc39', '#e91e63', '#ffeb3b', '#795548']
+        lista_bases_mapa = df_routed['BASE_ATRIBUIDA'].unique().tolist()
+        
+        heat_data = [[r['LATITUDE'], r['LONGITUDE']] for _, r in df_real_tasks.iterrows()]
+        HeatMap(heat_data, name="🔥 Mapa de Calor (Demandas)", radius=15, blur=10).add_to(mapa)
+        marker_cluster = MarkerCluster(name="Obras (Agrupadas)").add_to(mapa)
+        
+        for base_nome in lista_bases_mapa:
+            idx_cor = lista_bases_mapa.index(base_nome)
+            cor_rota = cores_folium[idx_cor % len(cores_folium)]
+            df_base_rota = df_routed[df_routed['BASE_ATRIBUIDA'] == base_nome]
+            base_ref = next((b for b in bases_records if b['LEVANTADOR'] == base_nome), None)
+            b_lat, b_lon = float(str(base_ref['LATITUDE']).replace(',','.')), float(str(base_ref['LONGITUDE']).replace(',','.'))
+            folium.Marker([b_lat, b_lon], icon=folium.Icon(color='black', icon='home', prefix='fa'), tooltip=f"Base: {base_nome}").add_to(mapa)
+            
+            fg_linhas = folium.FeatureGroup(name=f"Rota: {base_nome}", show=False)
+            
+            for periodo_val in df_base_rota['PERIODO'].unique():
+                df_periodo = df_base_rota[df_base_rota['PERIODO'] == periodo_val]
+                
+                pontos_linha_folium = []
+                for _, r in df_periodo.iterrows():
+                    if isinstance(r.get('ROTA_GEOMETRIA'), list):
+                        for lon, lat in r['ROTA_GEOMETRIA']: pontos_linha_folium.append([lat, lon]) 
+                            
+                folium.PolyLine(pontos_linha_folium, color='black', weight=7, opacity=0.9).add_to(fg_linhas)
+                folium.PolyLine(pontos_linha_folium, color=cor_rota, weight=3, opacity=1.0).add_to(fg_linhas)
+                
+                for r in df_periodo.to_dict('records'):
+                    if r.get('PROTOCOLO') in ['RETORNO_BASE', 'PAUSA_ALMOCO']: continue
+                    icone = identificar_icone_folium(r, df_routed.columns)
                     
-                    if r.get('PROTOCOLO') in ['RETORNO_BASE', 'PAUSA_ALMOCO']:
-                        geometria = r.get('ROTA_GEOMETRIA')
-                        if isinstance(geometria, list):
-                            coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
-                        else:
-                            coords_linha_kml.append(f"          {lon},{lat},0")
-                        continue
-
                     is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
                     if is_super:
                         cor_icone = 'orange'
                     else:
                         cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
                     
-                    if is_super:
-                        qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
-                        pop_header_bg = "#FFD700"
-                        pop_header_color = "#000000"
-                        pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
-                        nome_ponto = f"[PRIORIDADE] [{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}" if r.get('PRIORIDADE') == "Sim" else f"[{r.get('ORDEM', 0)}] 🏢 SUPER PONTO {qtd_str}"
-                        style_url = "#icon-yellow"
-                    else:
-                        pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
-                        pop_header_color = "#ffffff"
-                        pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
-                        prot_str = str(r.get('PROTOCOLO', 'N/A'))
-                        nome_obra = str(r.get('NOME', ''))
-                        if nome_obra.lower() == 'nan': nome_obra = ''
-                        separador = " - " if nome_obra else ""
-                        tag_prio = "[PRIORIDADE] " if r.get('PRIORIDADE') == "Sim" else ""
-                        nome_ponto = f"{tag_prio}[{r.get('ORDEM', 0)}] Doc: {html.escape(prot_str)}{separador}{html.escape(nome_obra)}"
-                        style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
+                    pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
+                    pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
                     
                     dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
                     
                     extra_rows_list = []
-                    for c in cols_exibir:
+                    for c in colunas_exibir:
                         if c.upper() != 'PROTOCOLO' and c.upper() != 'NOME_DIA':
                             val_html = formata_campo_html(r.get(c, ''))
                             extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
@@ -573,11 +767,11 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
 
                     popup_html = f"""
                     <div style="font-family:sans-serif; width:280px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
-                        <div style="background:{pop_header_bg}; color:{pop_header_color}; padding:8px 10px; font-size:13px; font-weight:bold;">{pop_prio_txt}</div>
+                        <div style="background:{pop_header_bg}; color:white; padding:8px 10px; font-size:13px; font-weight:bold;">{pop_prio_txt}</div>
                         <div style="padding:10px; background:#fafafa; font-size:12px;">
                             <table style="width:100%; border-collapse:collapse;">
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
-                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} (Dia {r.get('PERIODO', 0)})</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
@@ -1217,8 +1411,8 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
             
             st.session_state.vrp_state = {
                 'config': {
-                    'velocidade_media_kmh': 999.0, # Velocidade infinita para garantir que a distância não quebre a conta
-                    'tempo_medio_obra': 0.1,       # Tempo irrisório para garantir que a hora do dia não quebre a conta
+                    'velocidade_media_kmh': 999.0, # Velocidade infinita
+                    'tempo_medio_obra': 0.1,       # Tempo irrisório
                     'obras_por_dia': obras_dia_final, 
                     'limite_periodos': limite_periodos
                 },
@@ -1232,13 +1426,14 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
     # ESTADO 3.1: MOTOR IA (VRP) E BALANCEAMENTO DE CARGA
     # ---------------------------------------------------------
     def fetch_geom_wrapper(item):
+        vel = st.session_state.vrp_state.get('config', {}).get('velocidade_media_kmh', 999.0)
         try:
-            geom, dur_sec = obter_rota_ruas(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'], "http://router.project-osrm.org", cfg['velocidade_media_kmh'])
+            geom, dur_sec = obter_rota_ruas(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'], "http://router.project-osrm.org", vel)
             return geom, dur_sec
         except Exception:
             coords = np.array([[item['lat_ant'], item['lon_ant']], [item['lat_atual'], item['lon_atual']]])
             dist_m = calcular_matriz_distancias_numpy(coords)[0][1]
-            return [[item['lon_ant'], item['lat_ant']], [item['lon_atual'], item['lat_atual']]], (dist_m / 1000.0 / cfg['velocidade_media_kmh']) * 3600
+            return [[item['lon_ant'], item['lat_ant']], [item['lon_atual'], item['lat_atual']]], (dist_m / 1000.0 / vel) * 3600
 
     if status_exec in ["RUNNING"]:
         st.markdown("## 🚀 Execução do Motor de Inteligência (OR-Tools VRP)")
@@ -1495,7 +1690,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
             
         progress_bar = st.progress(0.0)
         status_text = st.empty()
-        timer_placeholder = st.empty() # <-- CORREÇÃO: Variável do relógio recolocada aqui
+        timer_placeholder = st.empty() 
         
         df_routed = st.session_state.df_routed
         data_atual_formatada = datetime.now().strftime("%d.%m.%Y")
@@ -1557,7 +1752,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                 zip_xl.writestr(f"Resumo_Levantadores - {data_atual_formatada}.xlsx", gerar_excel_resumo_bytes(df_resumo))
                 
                 update_ui("Gerando Mapa KML Consolidado de todas as rotas...")
-                kml_geral_str = gerar_kml_agrupado(df_routed, st.session_state.bases_records, f"ROTA TOTAL LEVANTADORES - {data_atual_formatada}", st.session_state.colunas_exibir, bases_unicas, "Dia")
+                kml_geral_str = gerar_kml_agrupado(df_routed, st.session_state.bases_records, f"ROTA TOTAL LEVANTADORES - {data_atual_formatada}", st.session_state.colunas_exibir, bases_unicas)
                 zip_kml.writestr(f"ROTA TOTAL LEVANTADORES - {data_atual_formatada}.kml", kml_geral_str.encode('utf-8'))
                 
                 for base_nome in bases_unicas:
@@ -1569,7 +1764,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     zip_xl.writestr(f"ROTA_{nome_seguro} - {data_atual_formatada}.xlsx", gerar_excel_bytes(df_lev, st.session_state.col_prioridade, st.session_state.colunas_originais))
                     
                     update_ui(f"Traçando Mapa KML individual para: {base_nome}...")
-                    kml_lev_str = gerar_kml_agrupado(df_lev, st.session_state.bases_records, f"ROTA_{nome_seguro} - {data_atual_formatada}", st.session_state.colunas_exibir, bases_unicas, "Dia")
+                    kml_lev_str = gerar_kml_agrupado(df_lev, st.session_state.bases_records, f"ROTA_{nome_seguro} - {data_atual_formatada}", st.session_state.colunas_exibir, bases_unicas)
                     zip_kml.writestr(f"ROTA_{nome_seguro} - {data_atual_formatada}.kml", kml_lev_str.encode('utf-8'))
                     
             st.session_state.bytes_zip_xl = buf_zip_xl.getvalue()
