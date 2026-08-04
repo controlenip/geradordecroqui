@@ -837,7 +837,10 @@ def view_roteirizador():
         dias_multiplicador = len(cfg_atual.get('dias_selecionados', [])) if tipo_periodo_meta == "Semana" else 1
         
         meta_exata_por_equipe = obras_dia_meta * dias_multiplicador * limite_periodos_meta
-        tot_equipes_cadastradas = len(st.session_state.bases_records)
+        
+        # === CORREÇÃO 4: Garante que a auditoria conte pessoas únicas, e não linhas da planilha
+        tot_equipes_cadastradas = len(set(b['LEVANTADOR'] for b in st.session_state.bases_records))
+        
         meta_global_exata = meta_exata_por_equipe * tot_equipes_cadastradas
         
         obras_por_equipe = {b['LEVANTADOR']: 0 for b in st.session_state.bases_records}
@@ -1176,8 +1179,9 @@ def view_roteirizador():
                     st.error(f"Erro: {e}")
 
             # === CORREÇÃO 1: CÁLCULO DINÂMICO DE EQUIPES AGORA LÊ AS BASES REAIS ===
-            qtd_eq_princ = len(df_bases) if 'df_bases' in locals() and not df_bases.empty else 0
-            qtd_eq_temp = len(df_bases_temp) if 'df_bases_temp' in locals() and not df_bases_temp.empty else 0
+            # Conta valores únicos de LEVANTADOR em vez do número de linhas da planilha
+            qtd_eq_princ = df_bases['LEVANTADOR'].nunique() if 'df_bases' in locals() and not df_bases.empty else 0
+            qtd_eq_temp = df_bases_temp['LEVANTADOR'].nunique() if 'df_bases_temp' in locals() and not df_bases_temp.empty else 0
             qtd_eq_atual_live = qtd_eq_princ + qtd_eq_temp
             st.session_state.qtd_equipes_ativas = qtd_eq_atual_live
             
@@ -1200,6 +1204,14 @@ def view_roteirizador():
                         if len(dfs) == 0: st.session_state.colunas_originais_lev = df_temp.columns.tolist()
                         df_temp.columns = normalize_cols(df_temp.columns)
                         df_temp['_ORIGEM_BASE'] = 'LEVANTAMENTO'
+                        
+                        # === CORREÇÃO NIP: Mapeamento dinâmico da coluna do identificador
+                        if 'PROTOCOLO' not in df_temp.columns:
+                            for col_candidata in ['NOTA', 'NOTA CCS', 'NOTA SGO', 'ID SISCO', 'OS']:
+                                if col_candidata in df_temp.columns:
+                                    df_temp['PROTOCOLO'] = df_temp[col_candidata]
+                                    break
+                                    
                         dfs.append(df_temp)
                         
                 if saneamento_files:
@@ -1214,8 +1226,12 @@ def view_roteirizador():
                         if 'LONGITUDE PROJETO' in df_temp.columns and 'LONGITUDE' not in df_temp.columns:
                             df_temp['LONGITUDE'] = df_temp['LONGITUDE PROJETO']
                         
-                        if 'NOTA' in df_temp.columns and 'PROTOCOLO' not in df_temp.columns:
-                            df_temp['PROTOCOLO'] = df_temp['NOTA']
+                        # === CORREÇÃO NIP: Mapeamento dinâmico da coluna do identificador
+                        if 'PROTOCOLO' not in df_temp.columns:
+                            for col_candidata in ['NOTA', 'NOTA CCS', 'NOTA SGO', 'ID SISCO', 'OS']:
+                                if col_candidata in df_temp.columns:
+                                    df_temp['PROTOCOLO'] = df_temp[col_candidata]
+                                    break
                             
                         dfs.append(df_temp)
                         
@@ -1228,7 +1244,8 @@ def view_roteirizador():
                 cols_orig_san = st.session_state.get('colunas_originais_san', [])
                 st.session_state.colunas_originais = list(dict.fromkeys(cols_orig_lev + cols_orig_san))
                 
-                for c_nome in ['CONTA CONTRATO', 'INSTALACAO']:
+                # === CORREÇÃO: Limpeza de decimais (".0") indesejados nas notas ===
+                for c_nome in ['CONTA CONTRATO', 'INSTALACAO', 'PROTOCOLO']:
                     if c_nome in df_tasks.columns:
                         df_tasks[c_nome] = df_tasks[c_nome].astype(str).str.replace(r'\.0$', '', regex=True).replace('nan', '-')
                         
@@ -1261,12 +1278,13 @@ def view_roteirizador():
                     df_lev['STATUS_LIMPO'] = df_lev['STATUS LIST'].astype(str).str.strip().str.upper()
                     df_lev = df_lev[df_lev['STATUS_LIMPO'].isin(status_selecionados)].drop(columns=['STATUS_LIMPO'])
 
+                # === CORREÇÃO: Impedir que as mais de 6 mil obras sem tipo de nota sejam deletadas ===
                 if 'TIPO NOTA' in df_lev.columns:
-                    tipos_nota_brutos = [str(x).strip().upper() for x in df_lev['TIPO NOTA'].unique() if pd.notna(x) and str(x).lower() != 'nan']
-                    tipos_nota_unicos = sorted(list(set(tipos_nota_brutos)))
+                    df_lev['TIPO NOTA'] = df_lev['TIPO NOTA'].fillna('SEM TIPO').astype(str).str.strip().str.upper()
+                    tipos_nota_unicos = sorted(list(set(df_lev['TIPO NOTA'].unique())))
                     tipos_selecionados = c_filt2.multiselect("🏷️ Filtrar TIPO DE NOTA (Todas as Obras):", tipos_nota_unicos, default=tipos_nota_unicos)
                     if not tipos_selecionados: st.warning("Selecione um Tipo de Nota."); return
-                    df_lev = df_lev[df_lev['TIPO NOTA'].astype(str).isin(tipos_selecionados)]
+                    df_lev = df_lev[df_lev['TIPO NOTA'].isin(tipos_selecionados)]
                     
                     padroes_prio = [t for t in tipos_selecionados if t in TIPOS_PRIORITARIOS]
                     tipos_prioritarios_selecionados = c_filt3.multiselect("🚨 Definir Obras PRIORITÁRIAS:", tipos_selecionados, default=padroes_prio)
