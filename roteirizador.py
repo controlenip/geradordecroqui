@@ -1425,8 +1425,9 @@ def view_roteirizador():
                     if pd.notna(lat) and pd.notna(lon):
                         for b in valid_bases:
                             b_name = b['LEVANTADOR']
-                            # Garante que a equipe jamais passará do limite exato imposto
-                            if base_counts[b_name] + qtd_real <= max_capacity:
+                            # AQUI ESTÁ A CORREÇÃO PRINCIPAL: Permite que a equipe absorva a última obra (como um super ponto)
+                            # contanto que o espaço dela ainda não estivesse totalmente esgotado. Isso impede "gaps" ociosos.
+                            if base_counts[b_name] < max_capacity:
                                 b_lat, b_lon = b.get('LATITUDE'), b.get('LONGITUDE')
                                 if pd.notna(b_lat) and pd.notna(b_lon):
                                     d = haversine_scalar(lat, lon, float(b_lat), float(b_lon))
@@ -1649,8 +1650,9 @@ def view_roteirizador():
                     for obra in ordered_tasks:
                         qtd_real = len(obra.get('_ORIGINAL_ROWS', [1])) if isinstance(obra.get('_ORIGINAL_ROWS'), list) else 1
                         
-                        if cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']: break
-                        if cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']: break
+                        # AQUI FOI REMOVIDA A SEGUNDA TRAVA DO MOTOR DE IA
+                        # O motor de rotas agora é forçado a mapear 100% da carga que foi balanceada,
+                        # mesmo que estoure um dia virtual adicional no relatório.
 
                         viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
                         
@@ -1683,8 +1685,6 @@ def view_roteirizador():
                         
                         virar_dia = False
                         
-                        # AQUI ESTÁ A CHAVE DA EXATIDÃO MATEMÁTICA
-                        # O dia só vira unica e exclusivamente quando bater a cota exata (ex: 30)
                         if obras_no_periodo_macro >= cfg['obras_por_dia']:
                             virar_dia = True
                                 
@@ -1711,9 +1711,6 @@ def view_roteirizador():
                                     semana_atual += 1
                                     dia_da_semana = 1
                                     
-                            if cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']: break
-                            if cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']: break
-                                
                             estado = iniciar_dia(dia_absoluto)
                             
                             viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
@@ -1742,7 +1739,8 @@ def view_roteirizador():
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
 
-                    if estado['obras_hoje'] > 0 and not (cfg['tipo_periodo'] == "Dia" and dia_absoluto > cfg['limite_periodos']) and not (cfg['tipo_periodo'] == "Semana" and semana_atual > cfg['limite_periodos']):
+                    # Ajustado para finalizar o expediente corretamente sem dropar dados da última rota do dia
+                    if estado['obras_hoje'] > 0:
                         dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
                         viagem_ret = (dist_ret / cfg['velocidade_media_kmh']) * 60
                         ret_fim = estado['time'] + pd.Timedelta(minutes=viagem_ret)
