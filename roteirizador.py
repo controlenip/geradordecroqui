@@ -55,12 +55,14 @@ except ImportError:
     st.stop()
 
 # ==========================================
-# 2. CONSTANTES GERAIS
+# 2. CONSTANTES GERAIS & ENGINE DE REDE FORTE
 # ==========================================
 STATUS_PADRAO = ['EM LEVANTAMENTO', '0', 'SEM INFORMAÇÕES', 'SEM INFORMACOES', 'CORREÇÃO DE LEVANTAMENTO', 'CORRECAO DE LEVANTAMENTO', 'PRÉ ANÁLISE', 'PRE ANALISE']
 TIPOS_PRIORITARIOS = ["CCF", "DIF", "MGD", "MTP", "ASC", "SID"]
 
-def get_retry_session(retries=4, backoff_factor=0.3):
+def get_retry_session(retries=8, backoff_factor=1.0):
+    # CORREÇÃO CRÍTICA OSRM: Aumentado para 8 tentativas com backoff_factor de 1.0 
+    # (Ele vai insistir 8 vezes esperando 1s, 2s, 4s... para vencer os bloqueios 429 do OSRM)
     session = requests.Session()
     retry = Retry(total=retries, read=retries, connect=retries, backoff_factor=backoff_factor, status_forcelist=(429, 500, 502, 503, 504))
     adapter = HTTPAdapter(max_retries=retry, pool_connections=100, pool_maxsize=100)
@@ -300,7 +302,7 @@ def obter_matriz_osrm(coords, url_osrm_base):
     coords_str = ";".join([f"{lon:.6f},{lat:.6f}" for lat, lon in coords])
     url = f"{url_osrm_base}/table/v1/driving/{coords_str}?annotations=distance"
     try:
-        r = http_session.get(url, timeout=5)
+        r = http_session.get(url, timeout=10)
         if r.status_code == 200:
             data = r.json()
             if data.get('code') == 'Ok': return np.array(data['distances']).astype(int).tolist()
@@ -357,16 +359,16 @@ def obter_coordenadas_municipio_cached(municipio):
     return np.nan, np.nan
 
 # ==========================================
-# === CORREÇÃO: AUMENTADO O TIMEOUT DA API E EVITADO BUSCAR SE OS PONTOS SÃO IGUAIS ===
+# === CORREÇÃO OSRM: TIMEOUT AMPLIADO PARA TRAÇADOS LONGOS ===
 # ==========================================
 def obter_rota_ruas(lat1, lon1, lat2, lon2, url_osrm_base, vel_fallback_kmh=30):
-    # Se for exatamente o mesmo lugar, não pede pro servidor para não dar erro
     if lat1 == lat2 and lon1 == lon2:
         return [[lon1, lat1], [lon2, lat2]], 0.0
         
     try:
         url = f"{url_osrm_base}/route/v1/driving/{lon1:.6f},{lat1:.6f};{lon2:.6f},{lat2:.6f}?overview=full&geometries=geojson"
-        r = http_session.get(url, timeout=10) # <--- TIMEOUT AUMENTADO PARA 10s
+        # OSRM pode demorar para calcular rotas de longas distâncias, alterado de 4s para 20s
+        r = http_session.get(url, timeout=20)
         if r.status_code == 200 and r.json().get('code') == 'Ok':
             return r.json()['routes'][0]['geometry']['coordinates'], r.json()['routes'][0]['duration']
     except Exception as e:
@@ -608,6 +610,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                                 <table style="width:100%; border-collapse:collapse;">
                                     <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
                                     <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
+                                    <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
                                     <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
                                     <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
                                     {extra_rows}
@@ -709,7 +712,6 @@ def view_roteirizador():
     if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
     if "config_financeira" not in st.session_state: st.session_state.config_financeira = {}
     
-    # NOVO: Cache de memória para não perder as coordenadas resgatadas ao clicar no botão
     if "cache_coords" not in st.session_state: st.session_state.cache_coords = {}
 
     status_exec = st.session_state.vrp_status
@@ -844,10 +846,7 @@ def view_roteirizador():
         dias_multiplicador = len(cfg_atual.get('dias_selecionados', [])) if tipo_periodo_meta == "Semana" else 1
         
         meta_exata_por_equipe = obras_dia_meta * dias_multiplicador * limite_periodos_meta
-        
-        # === CORREÇÃO 4: Garante que a auditoria conte pessoas únicas, e não linhas da planilha
         tot_equipes_cadastradas = len(set(b['LEVANTADOR'] for b in st.session_state.bases_records))
-        
         meta_global_exata = meta_exata_por_equipe * tot_equipes_cadastradas
         
         obras_por_equipe = {b['LEVANTADOR']: 0 for b in st.session_state.bases_records}
@@ -1186,7 +1185,6 @@ def view_roteirizador():
                     st.error(f"Erro: {e}")
 
             # === CORREÇÃO 1: CÁLCULO DINÂMICO DE EQUIPES AGORA LÊ AS BASES REAIS ===
-            # Conta valores únicos de LEVANTADOR em vez do número de linhas da planilha
             qtd_eq_princ = df_bases['LEVANTADOR'].nunique() if 'df_bases' in locals() and not df_bases.empty else 0
             qtd_eq_temp = df_bases_temp['LEVANTADOR'].nunique() if 'df_bases_temp' in locals() and not df_bases_temp.empty else 0
             qtd_eq_atual_live = qtd_eq_princ + qtd_eq_temp
@@ -1196,7 +1194,6 @@ def view_roteirizador():
             cap_por_eq_live = obras_por_dia * dias_multiplier * limite_periodos
             cap_total_estimada_live = cap_por_eq_live * (qtd_eq_atual_live if qtd_eq_atual_live > 0 else 1)
             
-            # --- 1ª RENDERIZAÇÃO DO PAINEL LATERAL: Inicial, sem obras ainda
             sidebar_html_placeholder.markdown(renderizar_painel_lateral(cap_por_eq_live, 0, qtd_eq_atual_live, cap_total_estimada_live), unsafe_allow_html=True)
 
             if not task_files and not saneamento_files: 
@@ -1212,7 +1209,6 @@ def view_roteirizador():
                         df_temp.columns = normalize_cols(df_temp.columns)
                         df_temp['_ORIGEM_BASE'] = 'LEVANTAMENTO'
                         
-                        # === CORREÇÃO NIP: Mapeamento dinâmico da coluna do identificador
                         if 'PROTOCOLO' not in df_temp.columns:
                             for col_candidata in ['NOTA', 'NOTA CCS', 'NOTA SGO', 'ID SISCO', 'OS']:
                                 if col_candidata in df_temp.columns:
@@ -1233,7 +1229,6 @@ def view_roteirizador():
                         if 'LONGITUDE PROJETO' in df_temp.columns and 'LONGITUDE' not in df_temp.columns:
                             df_temp['LONGITUDE'] = df_temp['LONGITUDE PROJETO']
                         
-                        # === CORREÇÃO NIP: Mapeamento dinâmico da coluna do identificador
                         if 'PROTOCOLO' not in df_temp.columns:
                             for col_candidata in ['NOTA', 'NOTA CCS', 'NOTA SGO', 'ID SISCO', 'OS']:
                                 if col_candidata in df_temp.columns:
@@ -1251,7 +1246,6 @@ def view_roteirizador():
                 cols_orig_san = st.session_state.get('colunas_originais_san', [])
                 st.session_state.colunas_originais = list(dict.fromkeys(cols_orig_lev + cols_orig_san))
                 
-                # === CORREÇÃO: Limpeza de decimais (".0") indesejados nas notas ===
                 for c_nome in ['CONTA CONTRATO', 'INSTALACAO', 'PROTOCOLO']:
                     if c_nome in df_tasks.columns:
                         df_tasks[c_nome] = df_tasks[c_nome].astype(str).str.replace(r'\.0$', '', regex=True).replace('nan', '-')
@@ -1285,7 +1279,6 @@ def view_roteirizador():
                     df_lev['STATUS_LIMPO'] = df_lev['STATUS LIST'].astype(str).str.strip().str.upper()
                     df_lev = df_lev[df_lev['STATUS_LIMPO'].isin(status_selecionados)].drop(columns=['STATUS_LIMPO'])
 
-                # === CORREÇÃO: Impedir que as mais de 6 mil obras sem tipo de nota sejam deletadas ===
                 if 'TIPO NOTA' in df_lev.columns:
                     df_lev['TIPO NOTA'] = df_lev['TIPO NOTA'].fillna('SEM TIPO').astype(str).str.strip().str.upper()
                     tipos_nota_unicos = sorted(list(set(df_lev['TIPO NOTA'].unique())))
@@ -1333,7 +1326,6 @@ def view_roteirizador():
                     df_erros = df_tasks[erros_coords_mask].copy()
                     df_ok = df_tasks[~erros_coords_mask].copy()
                     
-                    # === CORREÇÃO 2: CACHE DO SATÉLITE PARA NÃO TRAVAR O BOTÃO ===
                     lats, lons = [], []
                     for i, row in enumerate(df_erros.itertuples()):
                         end_val = getattr(row, col_end)
@@ -1497,7 +1489,6 @@ def view_roteirizador():
             tot_unallocated = sum(len(r['_ORIGINAL_ROWS']) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1 for _, r in df_unallocated.iterrows())
             st.session_state.tot_obras_nao_alocadas = tot_unallocated
 
-            # --- 2ª RENDERIZAÇÃO DO PAINEL LATERAL: Atualiza ao vivo o Card Verde de Obras prontas ---
             tot_obras_prontas = sum(len(r['_ORIGINAL_ROWS']) if isinstance(r.get('_ORIGINAL_ROWS'), list) else 1 for _, r in df_tasks_alocadas.iterrows())
             sidebar_html_placeholder.markdown(renderizar_painel_lateral(cap_por_eq_live, tot_obras_prontas, qtd_eq_atual_live, cap_total_estimada_live), unsafe_allow_html=True)
 
@@ -1507,7 +1498,6 @@ def view_roteirizador():
                 
             bases_records = todas_bases_records 
 
-        # Menu de exportação final
         with st.expander("🛠️ 5. Configuração de Saída", expanded=True):
             todas_cols = df_tasks_alocadas.columns.tolist()
             
@@ -1525,7 +1515,6 @@ def view_roteirizador():
             if has_levantamento: col_prioridade = "TIPO NOTA"
             else: col_prioridade = "Nenhuma"
 
-        # === CORREÇÃO 3: MELHORIA NO ERRO DO BOTÃO ===
         if st.button("🚀 Iniciar Motor de Roteirização (OR-Tools)", type="primary", use_container_width=True):
             if df_tasks_alocadas.empty: 
                 st.error("🚨 Nenhuma obra foi alocada! Verifique se os municípios da planilha batem com os das equipes, ou altere a 'Regra' (no passo 1) para 'Proximidade Geográfica'.")
@@ -1565,10 +1554,9 @@ def view_roteirizador():
     # ---------------------------------------------------------
     # ESTADO 3.1: MOTOR IA (VRP) E BALANCEAMENTO DE CARGA
     # ---------------------------------------------------------
-    
-    # === CORREÇÃO OSRM: Atraso incluído para evitar banimento (HTTP 429) do IP ===
     def fetch_geom_wrapper(item):
-        time.sleep(0.3)
+        # Atraso cravado em 0.6s dentro da thread para o servidor respirar
+        time.sleep(0.6)
         try:
             geom, dur_sec = obter_rota_ruas(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'], cfg['url_osrm_base'], cfg['velocidade_media_kmh'])
             return geom, dur_sec
@@ -1788,8 +1776,9 @@ def view_roteirizador():
                             'viagem_min': viagem_ret, 'dist_km': dist_ret
                         })
 
-                    # === CORREÇÃO OSRM: Reduzido de 10 para 3 conexões simultâneas para não estourar o limite ===
-                    with ThreadPoolExecutor(max_workers=3) as executor:
+                    # === CORREÇÃO FINAL DE BLOQUEIO DE IP (ERRO 429 DO OSRM) ===
+                    # Reduzido para max_workers=2 para garantir a sobrevida da comunicação da API
+                    with ThreadPoolExecutor(max_workers=2) as executor:
                         geoms_and_durs = list(executor.map(fetch_geom_wrapper, rotas_flat))
 
                     ordem_global = 1
@@ -1880,8 +1869,6 @@ def view_roteirizador():
             
         progress_bar = st.progress(0.0)
         status_text = st.empty()
-        
-        # === CORREÇÃO DO ERRO DO RELÓGIO NESTA LINHA AQUI ===
         timer_placeholder = st.empty()
         
         df_routed = st.session_state.df_routed
