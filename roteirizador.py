@@ -561,14 +561,12 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     for r in df_dia.to_dict('records'):
                         lon, lat = str(r.get('LONGITUDE')).replace(',','.'), str(r.get('LATITUDE')).replace(',','.')
                         
-                        # === CORREÇÃO KML: Agora extrai o desenho das ruas para TODAS as obras ===
                         geometria = r.get('ROTA_GEOMETRIA')
                         if isinstance(geometria, list):
                             coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
                         else:
                             coords_linha_kml.append(f"          {lon},{lat},0")
 
-                        # Se for pausas do sistema, pula o desenho do ícone (pois eles não têm endereço de cliente)
                         if r.get('PROTOCOLO') in ['RETORNO_BASE', 'PAUSA_ALMOCO']:
                             continue
 
@@ -635,7 +633,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                 for r in df_dia.to_dict('records'):
                     lon, lat = str(r.get('LONGITUDE')).replace(',','.'), str(r.get('LATITUDE')).replace(',','.')
                     
-                    # === CORREÇÃO KML: Agora extrai o desenho das ruas para TODAS as obras ===
                     geometria = r.get('ROTA_GEOMETRIA')
                     if isinstance(geometria, list):
                         coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
@@ -681,6 +678,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                             <table style="width:100%; border-collapse:collapse;">
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Nota/Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Ordem:</td><td style="padding:3px 6px; color:#333;">{r.get('ORDEM', 0)} ({r.get('NOME_DIA', f'Dia {r.get("DIA", 0)}')})</td></tr>
+                                <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Horário:</td><td style="padding:3px 6px; color:#333;">{r.get('HORA_INICIO', '')} às {r.get('HORA_FIM', '')}</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Ant.:</td><td style="padding:3px 6px; color:#333;">{r.get('DISTANCIA_PONTO_ANTERIOR_KM', 0)} KM</td></tr>
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555;">Distância Próx.:</td><td style="padding:3px 6px; color:#333;">{dist_prox} KM</td></tr>
                                 {extra_rows}
@@ -981,7 +979,7 @@ def view_roteirizador():
 
                     popup_html = f"""
                     <div style="font-family:sans-serif; width:280px; border-radius:8px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.15);">
-                        <div style="background:{pop_header_bg}; color:white; padding:8px 10px; font-size:13px; font-weight:bold;">{pop_prio_txt}</div>
+                        <div style="background:{pop_header_bg}; color:{pop_header_color}; padding:8px 10px; font-size:13px; font-weight:bold;">{pop_prio_txt}</div>
                         <div style="padding:10px; background:#fafafa; font-size:12px;">
                             <table style="width:100%; border-collapse:collapse;">
                                 <tr><td style="padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;">Protocolo:</td><td style="padding:3px 6px; color:#333;">{prot_html}</td></tr>
@@ -1554,7 +1552,7 @@ def view_roteirizador():
     # ESTADO 3.1: MOTOR IA (VRP) E BALANCEAMENTO DE CARGA
     # ---------------------------------------------------------
     def fetch_geom_wrapper(item):
-        time.sleep(0.8)
+        time.sleep(0.6)
         try:
             geom, dur_sec = obter_rota_ruas(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'], cfg['url_osrm_base'], cfg['velocidade_media_kmh'])
             return geom, dur_sec
@@ -1792,7 +1790,7 @@ def view_roteirizador():
                                 'DIA': item['dia'], 
                                 'PERIODO': periodo_val,
                                 'DISTANCIA_PONTO_ANTERIOR_KM': 0.0, 'TEMPO_VIAGEM_MINUTOS': 0.0,
-                                'ROTA_GEOMETRIA': [[item['lon_atual'], item['lat_atual']], [item['lon_atual'], item['lat_atual']]],
+                                'ROTA_GEOMETRIA': geom, # <-- GEOMETRIA AGORA SALVA
                                 'PRIORIDADE': 'Não',
                                 'HORA_INICIO': item['hora_inicio'].strftime('%H:%M'),
                                 'HORA_FIM': item['hora_fim'].strftime('%H:%M'),
@@ -1809,7 +1807,8 @@ def view_roteirizador():
                                 'PERIODO': periodo_val,
                                 'DISTANCIA_PONTO_ANTERIOR_KM': round(item['dist_km'], 2), 
                                 'TEMPO_VIAGEM_MINUTOS': round(item['viagem_min'], 1),
-                                'ROTA_GEOMETRIA': geom, 'PRIORIDADE': 'Não',
+                                'ROTA_GEOMETRIA': geom,
+                                'PRIORIDADE': 'Não',
                                 'HORA_INICIO': item['hora_inicio'].strftime('%H:%M'),
                                 'HORA_FIM': item['hora_fim'].strftime('%H:%M'),
                                 '_HORA_INICIO_DT': item['hora_inicio'], '_HORA_FIM_DT': item['hora_fim']
@@ -1823,7 +1822,7 @@ def view_roteirizador():
                             obra['PERIODO'] = periodo_val
                             obra['DISTANCIA_PONTO_ANTERIOR_KM'] = round(item['dist_km'], 2)
                             obra['TEMPO_VIAGEM_MINUTOS'] = round(item['viagem_min'], 1)
-                            obra['ROTA_GEOMETRIA'] = geom
+                            obra['ROTA_GEOMETRIA'] = geom # <-- GEOMETRIA AGORA SALVA
                             obra['HORA_INICIO'] = item['hora_inicio'].strftime('%H:%M')
                             obra['HORA_FIM'] = item['hora_fim'].strftime('%H:%M')
                             obra['_HORA_INICIO_DT'] = item['hora_inicio']
