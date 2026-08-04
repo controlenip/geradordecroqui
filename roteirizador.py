@@ -1870,6 +1870,9 @@ def view_roteirizador():
         progress_bar = st.progress(0.0)
         status_text = st.empty()
         
+        # === CORREÇÃO DO ERRO DO RELÓGIO NESTA LINHA AQUI ===
+        timer_placeholder = st.empty()
+        
         df_routed = st.session_state.df_routed
         data_atual_formatada = datetime.now().strftime("%d.%m.%Y")
         
