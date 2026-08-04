@@ -701,6 +701,9 @@ def view_roteirizador():
     if "col_prioridade" not in st.session_state: st.session_state.col_prioridade = "TIPO NOTA"
     if "colunas_originais" not in st.session_state: st.session_state.colunas_originais = []
     if "config_financeira" not in st.session_state: st.session_state.config_financeira = {}
+    
+    # NOVO: Cache de memória para não perder as coordenadas resgatadas ao clicar no botão
+    if "cache_coords" not in st.session_state: st.session_state.cache_coords = {}
 
     status_exec = st.session_state.vrp_status
     is_done = st.session_state.roteamento_concluido
@@ -1172,9 +1175,9 @@ def view_roteirizador():
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
-            # === CÁLCULO DINÂMICO DE EQUIPES E PAINEL LATERAL ===
-            qtd_eq_princ = len(st.session_state.get('temp_eq_princ', []))
-            qtd_eq_temp = len(st.session_state.get('temp_eq_apoio', []))
+            # === CORREÇÃO 1: CÁLCULO DINÂMICO DE EQUIPES AGORA LÊ AS BASES REAIS ===
+            qtd_eq_princ = len(df_bases) if 'df_bases' in locals() and not df_bases.empty else 0
+            qtd_eq_temp = len(df_bases_temp) if 'df_bases_temp' in locals() and not df_bases_temp.empty else 0
             qtd_eq_atual_live = qtd_eq_princ + qtd_eq_temp
             st.session_state.qtd_equipes_ativas = qtd_eq_atual_live
             
@@ -1305,16 +1308,24 @@ def view_roteirizador():
                     df_erros = df_tasks[erros_coords_mask].copy()
                     df_ok = df_tasks[~erros_coords_mask].copy()
                     
+                    # === CORREÇÃO 2: CACHE DO SATÉLITE PARA NÃO TRAVAR O BOTÃO ===
                     lats, lons = [], []
                     for i, row in enumerate(df_erros.itertuples()):
                         end_val = getattr(row, col_end)
                         mun_val = getattr(row, col_mun)
-                        lat, lon = geocode_endereco_nominatim(end_val, mun_val)
+                        
+                        cache_key = f"{end_val}_{mun_val}"
+                        if cache_key in st.session_state.cache_coords:
+                            lat, lon = st.session_state.cache_coords[cache_key]
+                        else:
+                            lat, lon = geocode_endereco_nominatim(end_val, mun_val)
+                            st.session_state.cache_coords[cache_key] = (lat, lon)
+                            time.sleep(0.6) 
+                            
                         lats.append(lat)
                         lons.append(lon)
-                        time.sleep(0.6) 
                         my_bar.progress((i + 1) / qtd_erros_iniciais)
-                        
+                    
                     df_erros['LATITUDE'] = lats
                     df_erros['LONGITUDE'] = lons
                     my_bar.empty()
@@ -1425,8 +1436,6 @@ def view_roteirizador():
                     if pd.notna(lat) and pd.notna(lon):
                         for b in valid_bases:
                             b_name = b['LEVANTADOR']
-                            # AQUI ESTÁ A CORREÇÃO PRINCIPAL: Permite que a equipe absorva a última obra (como um super ponto)
-                            # contanto que o espaço dela ainda não estivesse totalmente esgotado. Isso impede "gaps" ociosos.
                             if base_counts[b_name] < max_capacity:
                                 b_lat, b_lon = b.get('LATITUDE'), b.get('LONGITUDE')
                                 if pd.notna(b_lat) and pd.notna(b_lon):
@@ -1491,8 +1500,11 @@ def view_roteirizador():
             if has_levantamento: col_prioridade = "TIPO NOTA"
             else: col_prioridade = "Nenhuma"
 
+        # === CORREÇÃO 3: MELHORIA NO ERRO DO BOTÃO ===
         if st.button("🚀 Iniciar Motor de Roteirização (OR-Tools)", type="primary", use_container_width=True):
-            if df_tasks_alocadas.empty: st.error("Selecione equipes válidas."); return
+            if df_tasks_alocadas.empty: 
+                st.error("🚨 Nenhuma obra foi alocada! Verifique se os municípios da planilha batem com os das equipes, ou altere a 'Regra' (no passo 1) para 'Proximidade Geográfica'.")
+                return
             if tipo_periodo == "Semana" and not dias_semana_selecionados:
                 st.error("Selecione os dias da semana na barra lateral antes de continuar.")
                 return
@@ -1650,10 +1662,6 @@ def view_roteirizador():
                     for obra in ordered_tasks:
                         qtd_real = len(obra.get('_ORIGINAL_ROWS', [1])) if isinstance(obra.get('_ORIGINAL_ROWS'), list) else 1
                         
-                        # AQUI FOI REMOVIDA A SEGUNDA TRAVA DO MOTOR DE IA
-                        # O motor de rotas agora é forçado a mapear 100% da carga que foi balanceada,
-                        # mesmo que estoure um dia virtual adicional no relatório.
-
                         viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
                         
                         if viagem_km < 0.05 and estado['obras_hoje'] > 0:
@@ -1739,7 +1747,6 @@ def view_roteirizador():
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
 
-                    # Ajustado para finalizar o expediente corretamente sem dropar dados da última rota do dia
                     if estado['obras_hoje'] > 0:
                         dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
                         viagem_ret = (dist_ret / cfg['velocidade_media_kmh']) * 60
