@@ -571,7 +571,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                             continue
 
                         is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
-                        cor_icone = 'orange' if is_super else ('red' if r.get('PRIORIDADE') == "Sim" else 'blue')
                         
                         if is_super:
                             qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
@@ -643,7 +642,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         continue
 
                     is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
-                    cor_icone = 'orange' if is_super else ('red' if r.get('PRIORIDADE') == "Sim" else 'blue')
                     
                     if is_super:
                         qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
@@ -960,11 +958,13 @@ def view_roteirizador():
                     is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
                     if is_super:
                         cor_icone = 'orange'
+                        qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
+                        pop_header_bg, pop_header_color = "#FFD700", "#000000"
+                        pop_prio_txt = f"🏢 SUPER PONTO {qtd_str}"
                     else:
                         cor_icone = 'red' if r.get('PRIORIDADE') == "Sim" else 'blue'
-                    
-                    pop_header_bg = "#d9534f" if r.get('PRIORIDADE') == "Sim" else "#0D256C"
-                    pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
+                        pop_header_bg, pop_header_color = ("#d9534f", "#ffffff") if r.get('PRIORIDADE') == "Sim" else ("#0D256C", "#ffffff")
+                        pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
                     
                     dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
                     
@@ -1552,7 +1552,7 @@ def view_roteirizador():
     # ESTADO 3.1: MOTOR IA (VRP) E BALANCEAMENTO DE CARGA
     # ---------------------------------------------------------
     def fetch_geom_wrapper(item):
-        time.sleep(0.6)
+        time.sleep(0.8) 
         try:
             geom, dur_sec = obter_rota_ruas(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'], cfg['url_osrm_base'], cfg['velocidade_media_kmh'])
             return geom, dur_sec
@@ -1790,7 +1790,7 @@ def view_roteirizador():
                                 'DIA': item['dia'], 
                                 'PERIODO': periodo_val,
                                 'DISTANCIA_PONTO_ANTERIOR_KM': 0.0, 'TEMPO_VIAGEM_MINUTOS': 0.0,
-                                'ROTA_GEOMETRIA': geom, # <-- GEOMETRIA AGORA SALVA
+                                'ROTA_GEOMETRIA': geom,
                                 'PRIORIDADE': 'Não',
                                 'HORA_INICIO': item['hora_inicio'].strftime('%H:%M'),
                                 'HORA_FIM': item['hora_fim'].strftime('%H:%M'),
@@ -1822,7 +1822,7 @@ def view_roteirizador():
                             obra['PERIODO'] = periodo_val
                             obra['DISTANCIA_PONTO_ANTERIOR_KM'] = round(item['dist_km'], 2)
                             obra['TEMPO_VIAGEM_MINUTOS'] = round(item['viagem_min'], 1)
-                            obra['ROTA_GEOMETRIA'] = geom # <-- GEOMETRIA AGORA SALVA
+                            obra['ROTA_GEOMETRIA'] = geom
                             obra['HORA_INICIO'] = item['hora_inicio'].strftime('%H:%M')
                             obra['HORA_FIM'] = item['hora_fim'].strftime('%H:%M')
                             obra['_HORA_INICIO_DT'] = item['hora_inicio']
