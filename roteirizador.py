@@ -356,10 +356,17 @@ def obter_coordenadas_municipio_cached(municipio):
     except: pass
     return np.nan, np.nan
 
+# ==========================================
+# === CORREÇÃO: AUMENTADO O TIMEOUT DA API E EVITADO BUSCAR SE OS PONTOS SÃO IGUAIS ===
+# ==========================================
 def obter_rota_ruas(lat1, lon1, lat2, lon2, url_osrm_base, vel_fallback_kmh=30):
+    # Se for exatamente o mesmo lugar, não pede pro servidor para não dar erro
+    if lat1 == lat2 and lon1 == lon2:
+        return [[lon1, lat1], [lon2, lat2]], 0.0
+        
     try:
         url = f"{url_osrm_base}/route/v1/driving/{lon1:.6f},{lat1:.6f};{lon2:.6f},{lat2:.6f}?overview=full&geometries=geojson"
-        r = http_session.get(url, timeout=4)
+        r = http_session.get(url, timeout=10) # <--- TIMEOUT AUMENTADO PARA 10s
         if r.status_code == 200 and r.json().get('code') == 'Ok':
             return r.json()['routes'][0]['geometry']['coordinates'], r.json()['routes'][0]['duration']
     except Exception as e:
@@ -1558,9 +1565,12 @@ def view_roteirizador():
     # ---------------------------------------------------------
     # ESTADO 3.1: MOTOR IA (VRP) E BALANCEAMENTO DE CARGA
     # ---------------------------------------------------------
+    
+    # === CORREÇÃO OSRM: Atraso incluído para evitar banimento (HTTP 429) do IP ===
     def fetch_geom_wrapper(item):
+        time.sleep(0.3)
         try:
-            geom, dur_sec = obter_rota_ruas(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'], url_osrm_base, cfg['velocidade_media_kmh'])
+            geom, dur_sec = obter_rota_ruas(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'], cfg['url_osrm_base'], cfg['velocidade_media_kmh'])
             return geom, dur_sec
         except Exception:
             coords = np.array([[item['lat_ant'], item['lon_ant']], [item['lat_atual'], item['lon_atual']]])
@@ -1778,7 +1788,8 @@ def view_roteirizador():
                             'viagem_min': viagem_ret, 'dist_km': dist_ret
                         })
 
-                    with ThreadPoolExecutor(max_workers=10) as executor:
+                    # === CORREÇÃO OSRM: Reduzido de 10 para 3 conexões simultâneas para não estourar o limite ===
+                    with ThreadPoolExecutor(max_workers=3) as executor:
                         geoms_and_durs = list(executor.map(fetch_geom_wrapper, rotas_flat))
 
                     ordem_global = 1
