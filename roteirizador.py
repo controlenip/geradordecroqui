@@ -55,16 +55,14 @@ except ImportError:
     st.stop()
 
 # ==========================================
-# 2. CONSTANTES GERAIS & ENGINE DE REDE FORTE
+# 2. CONSTANTES GERAIS & REDE (RETRY ROBUSTO)
 # ==========================================
 STATUS_PADRAO = ['EM LEVANTAMENTO', '0', 'SEM INFORMAÇÕES', 'SEM INFORMACOES', 'CORREÇÃO DE LEVANTAMENTO', 'CORRECAO DE LEVANTAMENTO', 'PRÉ ANÁLISE', 'PRE ANALISE']
 TIPOS_PRIORITARIOS = ["CCF", "DIF", "MGD", "MTP", "ASC", "SID"]
 
 def get_retry_session(retries=8, backoff_factor=1.0):
-    # CORREÇÃO CRÍTICA OSRM: Aumentado para 8 tentativas com backoff_factor de 1.0 
-    # (Ele vai insistir 8 vezes esperando 1s, 2s, 4s... para vencer os bloqueios 429 do OSRM)
     session = requests.Session()
-    retry = Retry(total=retries, read=retries, connect=retries, backoff_factor=backoff_factor, status_forcelist=(429, 500, 502, 503, 504))
+    retry = Retry(total=retries, read=retries, connect=retries, backoff_factor=backoff_factor, status_forcelist=(400, 429, 500, 502, 503, 504))
     adapter = HTTPAdapter(max_retries=retry, pool_connections=100, pool_maxsize=100)
     session.mount('http://', adapter)
     session.mount('https://', adapter)
@@ -300,7 +298,8 @@ def calcular_matriz_distancias_numpy(coords):
 def obter_matriz_osrm(coords, url_osrm_base):
     if len(coords) > 100 and 'project-osrm' in url_osrm_base: return None
     coords_str = ";".join([f"{lon:.6f},{lat:.6f}" for lat, lon in coords])
-    url = f"{url_osrm_base}/table/v1/driving/{coords_str}?annotations=distance"
+    radiuses_str = ";".join(["10000"] * len(coords))
+    url = f"{url_osrm_base}/table/v1/driving/{coords_str}?annotations=distance&radiuses={radiuses_str}"
     try:
         r = http_session.get(url, timeout=10)
         if r.status_code == 200:
@@ -358,17 +357,13 @@ def obter_coordenadas_municipio_cached(municipio):
     except: pass
     return np.nan, np.nan
 
-# ==========================================
-# === CORREÇÃO OSRM: TIMEOUT AMPLIADO PARA TRAÇADOS LONGOS ===
-# ==========================================
 def obter_rota_ruas(lat1, lon1, lat2, lon2, url_osrm_base, vel_fallback_kmh=30):
     if lat1 == lat2 and lon1 == lon2:
         return [[lon1, lat1], [lon2, lat2]], 0.0
         
     try:
-        url = f"{url_osrm_base}/route/v1/driving/{lon1:.6f},{lat1:.6f};{lon2:.6f},{lat2:.6f}?overview=full&geometries=geojson"
-        # OSRM pode demorar para calcular rotas de longas distâncias, alterado de 4s para 20s
-        r = http_session.get(url, timeout=20)
+        url = f"{url_osrm_base}/route/v1/driving/{lon1:.6f},{lat1:.6f};{lon2:.6f},{lat2:.6f}?overview=full&geometries=geojson&radiuses=10000;10000"
+        r = http_session.get(url, timeout=20) 
         if r.status_code == 200 and r.json().get('code') == 'Ok':
             return r.json()['routes'][0]['geometry']['coordinates'], r.json()['routes'][0]['duration']
     except Exception as e:
@@ -392,7 +387,6 @@ def identificar_icone_folium(row, colunas):
     return 'info-sign'
 
 def renderizar_painel_lateral(cap_eq, obras_prontas, eq_sel, cap_tot):
-    """Gera o HTML visual do painel de monitoramento idêntico à interface de design solicitada."""
     return f'''
     <label style="font-size: 13.5px; font-weight: 700; color: #0D256C; margin-bottom: 4px; display: block; margin-top: 10px;">Capacidade da Rota (Por Equipe):</label>
     <div style="background-color: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; color: #d9534f; font-weight: 800; font-size: 15px; text-align: center;">
@@ -566,12 +560,16 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     
                     for r in df_dia.to_dict('records'):
                         lon, lat = str(r.get('LONGITUDE')).replace(',','.'), str(r.get('LATITUDE')).replace(',','.')
+                        
+                        # === CORREÇÃO KML: Agora extrai o desenho das ruas para TODAS as obras ===
+                        geometria = r.get('ROTA_GEOMETRIA')
+                        if isinstance(geometria, list):
+                            coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
+                        else:
+                            coords_linha_kml.append(f"          {lon},{lat},0")
+
+                        # Se for pausas do sistema, pula o desenho do ícone (pois eles não têm endereço de cliente)
                         if r.get('PROTOCOLO') in ['RETORNO_BASE', 'PAUSA_ALMOCO']:
-                            geometria = r.get('ROTA_GEOMETRIA')
-                            if isinstance(geometria, list):
-                                coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
-                            else:
-                                coords_linha_kml.append(f"          {lon},{lat},0")
                             continue
 
                         is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
@@ -636,12 +634,15 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                 
                 for r in df_dia.to_dict('records'):
                     lon, lat = str(r.get('LONGITUDE')).replace(',','.'), str(r.get('LATITUDE')).replace(',','.')
+                    
+                    # === CORREÇÃO KML: Agora extrai o desenho das ruas para TODAS as obras ===
+                    geometria = r.get('ROTA_GEOMETRIA')
+                    if isinstance(geometria, list):
+                        coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
+                    else:
+                        coords_linha_kml.append(f"          {lon},{lat},0")
+
                     if r.get('PROTOCOLO') in ['RETORNO_BASE', 'PAUSA_ALMOCO']:
-                        geometria = r.get('ROTA_GEOMETRIA')
-                        if isinstance(geometria, list):
-                            coords_linha_kml.extend([f"          {pt_lon},{pt_lat},0" for pt_lon, pt_lat in geometria])
-                        else:
-                            coords_linha_kml.append(f"          {lon},{lat},0")
                         continue
 
                     is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
@@ -768,7 +769,6 @@ def view_roteirizador():
             obras_por_dia = st.number_input("Obras Previstas por Dia", min_value=1, value=30, step=1, disabled=is_locked)
             limite_periodos = st.number_input(f"Limite total de {tipo_periodo}s", min_value=1, value=5, step=1, disabled=is_locked)
             
-            # Variáveis puramente cosméticas para gerar horário nos cards (não limitam nada)
             tempo_medio_obra = 1.5
             velocidade_media_kmh = 30.0
 
@@ -1184,7 +1184,6 @@ def view_roteirizador():
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
-            # === CORREÇÃO 1: CÁLCULO DINÂMICO DE EQUIPES AGORA LÊ AS BASES REAIS ===
             qtd_eq_princ = df_bases['LEVANTADOR'].nunique() if 'df_bases' in locals() and not df_bases.empty else 0
             qtd_eq_temp = df_bases_temp['LEVANTADOR'].nunique() if 'df_bases_temp' in locals() and not df_bases_temp.empty else 0
             qtd_eq_atual_live = qtd_eq_princ + qtd_eq_temp
@@ -1555,8 +1554,7 @@ def view_roteirizador():
     # ESTADO 3.1: MOTOR IA (VRP) E BALANCEAMENTO DE CARGA
     # ---------------------------------------------------------
     def fetch_geom_wrapper(item):
-        # Atraso cravado em 0.6s dentro da thread para o servidor respirar
-        time.sleep(0.6)
+        time.sleep(0.8)
         try:
             geom, dur_sec = obter_rota_ruas(item['lat_ant'], item['lon_ant'], item['lat_atual'], item['lon_atual'], cfg['url_osrm_base'], cfg['velocidade_media_kmh'])
             return geom, dur_sec
@@ -1776,8 +1774,6 @@ def view_roteirizador():
                             'viagem_min': viagem_ret, 'dist_km': dist_ret
                         })
 
-                    # === CORREÇÃO FINAL DE BLOQUEIO DE IP (ERRO 429 DO OSRM) ===
-                    # Reduzido para max_workers=2 para garantir a sobrevida da comunicação da API
                     with ThreadPoolExecutor(max_workers=2) as executor:
                         geoms_and_durs = list(executor.map(fetch_geom_wrapper, rotas_flat))
 
@@ -1951,7 +1947,7 @@ def view_roteirizador():
             st.session_state.bytes_zip_xl = buf_zip_xl.getvalue()
             st.session_state.bytes_zip_kml = buf_zip_kml.getvalue()
             
-            status_text.success("✅ Pacotes gerados e salvos com sucesso! Redirecionando para o Dashboard...")
+            status_text.success("✅ Pacotes gerados com sucesso! (Rotas extraídas integralmente para KML).")
             time.sleep(1.5)
             st.session_state.roteamento_concluido = True
             st.session_state.vrp_status = "IDLE"
