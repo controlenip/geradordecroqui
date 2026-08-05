@@ -181,7 +181,7 @@ def atualizar_status_via_df(df_principal, df_status, coluna_alvo):
     return df_principal
 
 # ==========================================
-# 4. TRATAMENTO DE SUPER PONTOS
+# 4. TRATAMENTO DE SUPER PONTOS (AGORA DINÂMICO)
 # ==========================================
 def fundir_super_pontos(df_tasks, raio_metros=5):
     if df_tasks.empty or 'LATITUDE' not in df_tasks.columns or 'LONGITUDE' not in df_tasks.columns:
@@ -210,19 +210,15 @@ def fundir_super_pontos(df_tasks, raio_metros=5):
             orig_rows = group.to_dict('records')
             row_base['_ORIGINAL_ROWS'] = orig_rows
             
+            # Unificador dinâmico que lê todas as colunas estranhas
             def safe_list_join(col_name):
-                return " | ".join([str(x).strip() if pd.notna(x) else "-" for x in group[col_name]])
+                itens = [str(x).strip() for x in group[col_name] if pd.notna(x) and str(x).lower() != 'nan']
+                itens_unicos = list(dict.fromkeys(itens)) # Remove duplicatas mantendo a ordem
+                return " | ".join(itens_unicos) if itens_unicos else "-"
             
-            if 'PROTOCOLO' in group.columns: row_base['PROTOCOLO'] = safe_list_join('PROTOCOLO')
-            if 'NOTA' in group.columns: row_base['NOTA'] = safe_list_join('NOTA')
-            if 'CONTA CONTRATO' in group.columns: row_base['CONTA CONTRATO'] = safe_list_join('CONTA CONTRATO')
-            if 'INSTALACAO' in group.columns: row_base['INSTALACAO'] = safe_list_join('INSTALACAO')
-            if 'NOME' in group.columns: row_base['NOME'] = safe_list_join('NOME')
-            if 'STATUS' in group.columns: row_base['STATUS'] = safe_list_join('STATUS')
-            if 'STATUS CLIENTE' in group.columns: row_base['STATUS CLIENTE'] = safe_list_join('STATUS CLIENTE')
-            if 'TIPO DEMANDA' in group.columns: row_base['TIPO DEMANDA'] = safe_list_join('TIPO DEMANDA')
-            if 'TEL FIXO' in group.columns: row_base['TEL FIXO'] = safe_list_join('TEL FIXO')
-            if 'TEL MOVEL' in group.columns: row_base['TEL MOVEL'] = safe_list_join('TEL MOVEL')
+            for col in group.columns:
+                if col not in ['LATITUDE', 'LONGITUDE', 'CLUSTER_ID', '_ORIGEM_BASE', 'PRIORIDADE']:
+                    row_base[col] = safe_list_join(col)
                 
             row_base['LATITUDE'] = group['LATITUDE'].mean()
             row_base['LONGITUDE'] = group['LONGITUDE'].mean()
@@ -643,6 +639,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         continue
 
                     is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
+                    cor_icone = 'orange' if is_super else ('red' if r.get('PRIORIDADE') == "Sim" else 'blue')
                     
                     if is_super:
                         qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
@@ -1123,7 +1120,6 @@ def view_roteirizador():
             with st.container(border=True):
                 saneamento_files = st.file_uploader("2️⃣ Base Saneamento", type=["xlsx", "xls"], accept_multiple_files=True, key="san_uploader")
 
-            # === NOVA FUNCIONALIDADE: BASE LIVRE (GENÉRICA) ===
             with st.container(border=True):
                 generica_files = st.file_uploader("3️⃣ Base Genérica / Livre (Qualquer Planilha)", type=["xlsx", "xls", "csv"], accept_multiple_files=True, key="gen_uploader")
             
@@ -1239,7 +1235,6 @@ def view_roteirizador():
                             
                         dfs.append(df_temp)
 
-                # === NOVO: LEITURA DA BASE GENÉRICA (QUALQUER PLANILHA) ===
                 if generica_files:
                     for f in generica_files:
                         if f.name.endswith('.csv'):
@@ -1251,12 +1246,10 @@ def view_roteirizador():
                         df_temp.columns = normalize_cols(df_temp.columns)
                         df_temp['_ORIGEM_BASE'] = 'GENERICA'
                         
-                        # Trava obrigatória de coordenadas
                         if 'LATITUDE' not in df_temp.columns or 'LONGITUDE' not in df_temp.columns:
                             st.error(f"🚨 A planilha '{f.name}' foi ignorada: É obrigatório conter colunas chamadas 'LATITUDE' e 'LONGITUDE'.")
                             continue
                             
-                        # Mapeamento do Identificador da Obra (Se não achar cria automático)
                         if 'PROTOCOLO' not in df_temp.columns:
                             id_cols = ['NOTA', 'NOTA CCS', 'NOTA SGO', 'ID SISCO', 'OS', 'ID', 'CODIGO', 'CHAMADO', 'CHAVE']
                             found_id = False
@@ -1267,18 +1260,6 @@ def view_roteirizador():
                                     break
                             if not found_id:
                                 df_temp['PROTOCOLO'] = [f"GEN-{i+1}" for i in range(len(df_temp))]
-                                
-                        # Mapeamento do Nome do Cliente/Obra (Para evitar erros na linha final)
-                        if 'NOME' not in df_temp.columns:
-                            name_cols = ['CLIENTE', 'NOME DO SOLICITANTE', 'RAZAO SOCIAL', 'DESCRICAO', 'ENDERECO', 'LOCAL']
-                            found_n = False
-                            for c in name_cols:
-                                if c in df_temp.columns:
-                                    df_temp['NOME'] = df_temp[c]
-                                    found_n = True
-                                    break
-                            if not found_n:
-                                df_temp['NOME'] = "PONTO " + df_temp['PROTOCOLO'].astype(str)
                                 
                         dfs.append(df_temp)
                         
@@ -1349,7 +1330,6 @@ def view_roteirizador():
                 df_san['PRIORIDADE'] = 'Não'
                 df_list.append(df_san)
 
-        # === NOVO: FILTROS DINÂMICOS DA BASE GENÉRICA ===
         if has_generica:
             with st.expander("🛠️ 4C. Filtros Iniciais - Base GENÉRICA", expanded=True):
                 df_gen = df_tasks[df_tasks['_ORIGEM_BASE'] == 'GENERICA'].copy()
@@ -1434,16 +1414,21 @@ def view_roteirizador():
         qtd_erros_coords_finais = erros_coords_mask.sum()
         df_tasks = df_tasks[~erros_coords_mask]
         
-        # === CORREÇÃO: Limpeza de Nomes (Aplicada estritamente às bases antigas para evitar dropar linhas da Genérica) ===
+        # === CORREÇÃO: VERIFICADOR SEGURO DE NOMES PARA NÃO DELETAR DADOS DA GENÉRICA ===
         erros_nome = 0
-        for col_nome in ['NOME', 'NOME DO SOLICITANTE', 'CLIENTE']:
+        if 'NOME' not in df_tasks.columns:
+            df_tasks['NOME'] = "SEM NOME"
+            
+        for col_nome in ['NOME DO SOLICITANTE', 'CLIENTE', 'RAZAO SOCIAL', 'DESCRICAO', 'ENDERECO', 'LOCAL']:
             if col_nome in df_tasks.columns:
-                mask_origin_strict = df_tasks['_ORIGEM_BASE'].isin(['LEVANTAMENTO', 'SANEAMENTO'])
-                mask_invalid = df_tasks[col_nome].isna() | (df_tasks[col_nome].astype(str).str.strip() == '')
-                drop_mask = mask_origin_strict & mask_invalid
-                
-                erros_nome += drop_mask.sum()
-                df_tasks = df_tasks[~drop_mask]
+                df_tasks['NOME'] = df_tasks['NOME'].fillna(df_tasks[col_nome])
+
+        mask_origin_strict = df_tasks['_ORIGEM_BASE'].isin(['LEVANTAMENTO', 'SANEAMENTO'])
+        mask_invalid = df_tasks['NOME'].isna() | (df_tasks['NOME'].astype(str).str.strip() == '') | (df_tasks['NOME'].astype(str).str.strip().str.lower() == 'nan')
+        drop_mask = mask_origin_strict & mask_invalid
+
+        erros_nome += drop_mask.sum()
+        df_tasks = df_tasks[~drop_mask]
 
         df_tasks, qtd_condensada = fundir_super_pontos(df_tasks, raio_metros=5)
         if qtd_condensada > 0:
