@@ -571,6 +571,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                             continue
 
                         is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
+                        cor_icone = 'orange' if is_super else ('red' if r.get('PRIORIDADE') == "Sim" else 'blue')
                         
                         if is_super:
                             qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
@@ -1121,9 +1122,13 @@ def view_roteirizador():
                 
             with st.container(border=True):
                 saneamento_files = st.file_uploader("2️⃣ Base Saneamento", type=["xlsx", "xls"], accept_multiple_files=True, key="san_uploader")
+
+            # === NOVA FUNCIONALIDADE: BASE LIVRE (GENÉRICA) ===
+            with st.container(border=True):
+                generica_files = st.file_uploader("3️⃣ Base Genérica / Livre (Qualquer Planilha)", type=["xlsx", "xls", "csv"], accept_multiple_files=True, key="gen_uploader")
             
             with st.container(border=True):
-                status_file = st.file_uploader("3️⃣ Planilha Atualizada SharePoint (Opcional)", type=["xlsx", "xls"])
+                status_file = st.file_uploader("4️⃣ Planilha Atualizada SharePoint (Opcional)", type=["xlsx", "xls"])
             
             df_status_upload = pd.DataFrame()
             coluna_status_selecionada = None
@@ -1193,8 +1198,8 @@ def view_roteirizador():
             
             sidebar_html_placeholder.markdown(renderizar_painel_lateral(cap_por_eq_live, 0, qtd_eq_atual_live, cap_total_estimada_live), unsafe_allow_html=True)
 
-            if not task_files and not saneamento_files: 
-                st.info("Aguardando upload de obras na Base Levantamento ou Base Saneamento.")
+            if not task_files and not saneamento_files and not generica_files: 
+                st.info("Aguardando upload de obras para iniciar o roteamento.")
                 return
 
             try:
@@ -1233,6 +1238,49 @@ def view_roteirizador():
                                     break
                             
                         dfs.append(df_temp)
+
+                # === NOVO: LEITURA DA BASE GENÉRICA (QUALQUER PLANILHA) ===
+                if generica_files:
+                    for f in generica_files:
+                        if f.name.endswith('.csv'):
+                            df_temp = pd.read_csv(f)
+                        else:
+                            df_temp = ler_planilha_cached(f.getvalue())
+                            
+                        if len(dfs) == 0: st.session_state.colunas_originais_gen = df_temp.columns.tolist()
+                        df_temp.columns = normalize_cols(df_temp.columns)
+                        df_temp['_ORIGEM_BASE'] = 'GENERICA'
+                        
+                        # Trava obrigatória de coordenadas
+                        if 'LATITUDE' not in df_temp.columns or 'LONGITUDE' not in df_temp.columns:
+                            st.error(f"🚨 A planilha '{f.name}' foi ignorada: É obrigatório conter colunas chamadas 'LATITUDE' e 'LONGITUDE'.")
+                            continue
+                            
+                        # Mapeamento do Identificador da Obra (Se não achar cria automático)
+                        if 'PROTOCOLO' not in df_temp.columns:
+                            id_cols = ['NOTA', 'NOTA CCS', 'NOTA SGO', 'ID SISCO', 'OS', 'ID', 'CODIGO', 'CHAMADO', 'CHAVE']
+                            found_id = False
+                            for c in id_cols:
+                                if c in df_temp.columns:
+                                    df_temp['PROTOCOLO'] = df_temp[c]
+                                    found_id = True
+                                    break
+                            if not found_id:
+                                df_temp['PROTOCOLO'] = [f"GEN-{i+1}" for i in range(len(df_temp))]
+                                
+                        # Mapeamento do Nome do Cliente/Obra (Para evitar erros na linha final)
+                        if 'NOME' not in df_temp.columns:
+                            name_cols = ['CLIENTE', 'NOME DO SOLICITANTE', 'RAZAO SOCIAL', 'DESCRICAO', 'ENDERECO', 'LOCAL']
+                            found_n = False
+                            for c in name_cols:
+                                if c in df_temp.columns:
+                                    df_temp['NOME'] = df_temp[c]
+                                    found_n = True
+                                    break
+                            if not found_n:
+                                df_temp['NOME'] = "PONTO " + df_temp['PROTOCOLO'].astype(str)
+                                
+                        dfs.append(df_temp)
                         
                 if not dfs: return
 
@@ -1241,7 +1289,8 @@ def view_roteirizador():
                 
                 cols_orig_lev = st.session_state.get('colunas_originais_lev', [])
                 cols_orig_san = st.session_state.get('colunas_originais_san', [])
-                st.session_state.colunas_originais = list(dict.fromkeys(cols_orig_lev + cols_orig_san))
+                cols_orig_gen = st.session_state.get('colunas_originais_gen', [])
+                st.session_state.colunas_originais = list(dict.fromkeys(cols_orig_lev + cols_orig_san + cols_orig_gen))
                 
                 for c_nome in ['CONTA CONTRATO', 'INSTALACAO', 'PROTOCOLO']:
                     if c_nome in df_tasks.columns:
@@ -1257,6 +1306,7 @@ def view_roteirizador():
         
         has_levantamento = 'LEVANTAMENTO' in df_tasks['_ORIGEM_BASE'].values
         has_saneamento = 'SANEAMENTO' in df_tasks['_ORIGEM_BASE'].values
+        has_generica = 'GENERICA' in df_tasks['_ORIGEM_BASE'].values
         
         df_list = []
         tipos_prioritarios_selecionados = []
@@ -1298,6 +1348,33 @@ def view_roteirizador():
                 df_san = df_tasks[df_tasks['_ORIGEM_BASE'] == 'SANEAMENTO'].copy()
                 df_san['PRIORIDADE'] = 'Não'
                 df_list.append(df_san)
+
+        # === NOVO: FILTROS DINÂMICOS DA BASE GENÉRICA ===
+        if has_generica:
+            with st.expander("🛠️ 4C. Filtros Iniciais - Base GENÉRICA", expanded=True):
+                df_gen = df_tasks[df_tasks['_ORIGEM_BASE'] == 'GENERICA'].copy()
+                st.info("💡 A base Genérica é flexível. Você pode escolher qual coluna define se uma obra é de Alta Prioridade.")
+                
+                col_c1, col_c2 = st.columns(2)
+                colunas_validas = [c for c in df_gen.columns if not c.startswith('_')]
+                
+                coluna_prio = col_c1.selectbox("Qual coluna define a prioridade?", ["Nenhuma"] + colunas_validas, key='prio_col_gen')
+                
+                if coluna_prio != "Nenhuma":
+                    valores_unicos = [str(x).strip() for x in df_gen[coluna_prio].unique() if pd.notna(x) and str(x).lower() != 'nan']
+                    valores_prio = col_c2.multiselect(f"Quais valores em '{coluna_prio}' indicam PRIORIDADE?", valores_unicos, key='prio_val_gen')
+                    
+                    if valores_prio:
+                        df_gen['PRIORIDADE'] = df_gen[coluna_prio].astype(str).apply(lambda x: 'Sim' if x.strip() in valores_prio else 'Não')
+                    else:
+                        df_gen['PRIORIDADE'] = 'Não'
+                    
+                    st.session_state.col_prioridade_gen = coluna_prio
+                else:
+                    df_gen['PRIORIDADE'] = 'Não'
+                    st.session_state.col_prioridade_gen = "Nenhuma"
+                
+                df_list.append(df_gen)
 
         if not df_list: return
         df_tasks = pd.concat(df_list, ignore_index=True)
@@ -1357,12 +1434,16 @@ def view_roteirizador():
         qtd_erros_coords_finais = erros_coords_mask.sum()
         df_tasks = df_tasks[~erros_coords_mask]
         
+        # === CORREÇÃO: Limpeza de Nomes (Aplicada estritamente às bases antigas para evitar dropar linhas da Genérica) ===
         erros_nome = 0
         for col_nome in ['NOME', 'NOME DO SOLICITANTE', 'CLIENTE']:
             if col_nome in df_tasks.columns:
-                erros_nome += df_tasks[col_nome].isna().sum()
-                df_tasks = df_tasks.dropna(subset=[col_nome])
-                df_tasks = df_tasks[df_tasks[col_nome].astype(str).str.strip() != '']
+                mask_origin_strict = df_tasks['_ORIGEM_BASE'].isin(['LEVANTAMENTO', 'SANEAMENTO'])
+                mask_invalid = df_tasks[col_nome].isna() | (df_tasks[col_nome].astype(str).str.strip() == '')
+                drop_mask = mask_origin_strict & mask_invalid
+                
+                erros_nome += drop_mask.sum()
+                df_tasks = df_tasks[~drop_mask]
 
         df_tasks, qtd_condensada = fundir_super_pontos(df_tasks, raio_metros=5)
         if qtd_condensada > 0:
@@ -1497,20 +1578,25 @@ def view_roteirizador():
 
         with st.expander("🛠️ 5. Configuração de Saída", expanded=True):
             todas_cols = df_tasks_alocadas.columns.tolist()
+            todas_cols_limpas = [c for c in todas_cols if not c.startswith('_')]
             
-            if has_saneamento and not has_levantamento:
+            if has_generica and not has_levantamento and not has_saneamento:
+                cols_desejadas = todas_cols_limpas
+            elif has_saneamento and not has_levantamento:
                 cols_desejadas = ['NOTA', 'CONTA CONTRATO', 'STATUS', 'STATUS CLIENTE', 'NOME', 'TIPO DEMANDA', 'MUNICIPIO', 'ENDEREÇO', 'BAIRRO', 'PONTO REFERÊNCIA', 'COMPLEMENTO', 'LATITUDE PROJETO', 'LONGITUDE PROJETO', 'TEL FIXO', 'TEL MÓVEL']
-            elif has_levantamento and not has_saneamento:
-                cols_desejadas = ['PROTOCOLO', 'CONTA CONTRATO', 'INSTALACAO', 'NOME', 'ENDEREÇO', 'MUNICIPIO', 'LATITUDE', 'LONGITUDE', 'TIPO NOTA']
             else:
                 cols_desejadas = ['PROTOCOLO', 'NOTA', 'CONTA CONTRATO', 'NOME', 'ENDEREÇO', 'MUNICIPIO', 'LATITUDE', 'LONGITUDE', 'TIPO NOTA', 'STATUS']
 
             cols_padrao = [c for c in normalize_cols(cols_desejadas) if c in todas_cols]
-            colunas_exibir = st.multiselect("Colunas Visíveis nos Cartões (KML/Mapa)", todas_cols, default=cols_padrao)
+            colunas_exibir = st.multiselect("Colunas Visíveis nos Cartões (KML/Mapa)", todas_cols_limpas, default=cols_padrao)
             st.info("⚡ **Deduplicação Ativa:** Obras num raio de 5 metros foram transformadas em Super Pontos para otimização.")
             
-            if has_levantamento: col_prioridade = "TIPO NOTA"
-            else: col_prioridade = "Nenhuma"
+            if has_generica: 
+                col_prioridade = st.session_state.get('col_prioridade_gen', "Nenhuma")
+            elif has_levantamento: 
+                col_prioridade = "TIPO NOTA"
+            else: 
+                col_prioridade = "Nenhuma"
 
         if st.button("🚀 Iniciar Motor de Roteirização (OR-Tools)", type="primary", use_container_width=True):
             if df_tasks_alocadas.empty: 
