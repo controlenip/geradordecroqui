@@ -1296,6 +1296,19 @@ def view_roteirizador():
             if not df_status_upload.empty and coluna_status_selecionada:
                 df_tasks = atualizar_status_via_df(df_tasks, df_status_upload, coluna_status_selecionada)
 
+            # ==========================================
+            # NOVO FILTRO: IGNORAR OBRAS JÁ DESPACHADAS
+            # ==========================================
+            if 'DATA DESPACHO CAMPO' in df_tasks.columns:
+                mask_despacho = df_tasks['DATA DESPACHO CAMPO'].notna() & \
+                                (df_tasks['DATA DESPACHO CAMPO'].astype(str).str.strip() != '') & \
+                                (df_tasks['DATA DESPACHO CAMPO'].astype(str).str.strip().str.lower() != 'nan')
+                
+                obras_despachadas = mask_despacho.sum()
+                if obras_despachadas > 0:
+                    st.info(f"⏭️ {obras_despachadas} obras foram ignoradas na roteirização pois a coluna 'DATA DESPACHO CAMPO' já está preenchida.")
+                    df_tasks = df_tasks[~mask_despacho]
+
         st.markdown("---")
         
         has_levantamento = 'LEVANTAMENTO' in df_tasks['_ORIGEM_BASE'].values
