@@ -250,9 +250,23 @@ def fundir_super_pontos(df_tasks, raio_metros=5):
 # ==========================================
 # 5. GEOCODING E MATEMÁTICA DE VETORES
 # ==========================================
+
+def is_endereco_lixo(endereco):
+    if pd.isna(endereco): return True
+    end_upper = str(endereco).strip().upper()
+    lixos = ['RUA NAO CADASTRADA', 'RUA NÃO CADASTRADA', 'S/N', 'SN', 'CENTRO', 'POV', 'POVOADO']
+    if end_upper in lixos or len(end_upper) <= 3:
+        return True
+    return False
+
 def geocode_endereco_nominatim(endereco, municipio):
     if pd.isna(endereco) or str(endereco).strip() == "" or pd.isna(municipio): 
         return np.nan, np.nan
+        
+    # ACELERADOR: Corta a busca imediatamente se o endereço for inútil para o satélite
+    if is_endereco_lixo(endereco):
+        return np.nan, np.nan
+        
     query = f"{str(endereco).strip()}, {str(municipio).strip()}, Maranhão, Brasil"
     url = "https://nominatim.openstreetmap.org/search"
     try:
@@ -567,7 +581,6 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                             continue
 
                         is_super = str(r.get('SUPER_PONTO', '')).startswith('SIM')
-                        cor_icone = 'orange' if is_super else ('red' if r.get('PRIORIDADE') == "Sim" else 'blue')
                         
                         if is_super:
                             qtd_str = str(r.get('SUPER_PONTO')).replace('SIM', '').strip()
@@ -1307,20 +1320,38 @@ def view_roteirizador():
                     df_lev['STATUS_LIMPO'] = df_lev['STATUS LIST'].astype(str).str.strip().str.upper()
                     df_lev = df_lev[df_lev['STATUS_LIMPO'].isin(status_selecionados)].drop(columns=['STATUS_LIMPO'])
 
-                if 'TIPO NOTA' in df_lev.columns:
-                    df_lev['TIPO NOTA'] = df_lev['TIPO NOTA'].fillna('SEM TIPO').astype(str).str.strip().str.upper()
-                    tipos_nota_unicos = sorted(list(set(df_lev['TIPO NOTA'].unique())))
-                    tipos_selecionados = c_filt2.multiselect("🏷️ Filtrar TIPO DE NOTA (Todas as Obras):", tipos_nota_unicos, default=tipos_nota_unicos)
-                    if not tipos_selecionados: st.warning("Selecione um Tipo de Nota."); return
-                    df_lev = df_lev[df_lev['TIPO NOTA'].isin(tipos_selecionados)]
+                colunas_validas = [c for c in df_lev.columns if not c.startswith('_')]
+                idx_default = 0
+                for i, col in enumerate(colunas_validas):
+                    if col in ['TIPO NOTA', 'TIPO DE NOTA', 'TIPO DEMANDA', 'TIPO', 'SERVICO']:
+                        idx_default = i + 1
+                        break
+                        
+                # === MELHORIA AQUI: O SELETOR DE COLUNA AGORA É DINÂMICO PARA A BASE DE LEVANTAMENTO ===
+                coluna_prio = c_filt2.selectbox("📌 1. Qual coluna define a prioridade?", ["Nenhuma"] + colunas_validas, index=idx_default, key='prio_col_lev_din')
+                
+                if coluna_prio != "Nenhuma":
+                    df_lev[coluna_prio] = df_lev[coluna_prio].fillna('SEM TIPO').astype(str).str.strip().str.upper()
+                    valores_unicos = sorted(list(set(df_lev[coluna_prio].unique())))
                     
-                    padroes_prio = [t for t in tipos_selecionados if t in TIPOS_PRIORITARIOS]
-                    tipos_prioritarios_selecionados = c_filt3.multiselect("🚨 Definir Obras PRIORITÁRIAS:", tipos_selecionados, default=padroes_prio)
+                    tipos_selecionados = c_filt2.multiselect(f"🏷️ 2. Filtrar dados na coluna '{coluna_prio}':", valores_unicos, default=valores_unicos, key='filt_prio_lev')
+                    if not tipos_selecionados: st.warning(f"Selecione valores em {coluna_prio}."); return
+                    df_lev = df_lev[df_lev[coluna_prio].isin(tipos_selecionados)]
+
+                    default_prio = [x for x in tipos_selecionados if x in TIPOS_PRIORITARIOS]
+                    valores_prio = c_filt3.multiselect(f"🚨 3. Definir PRIORIDADE em '{coluna_prio}':", tipos_selecionados, default=default_prio, key='def_prio_lev')
+                    
+                    if valores_prio:
+                        df_lev['PRIORIDADE'] = df_lev[coluna_prio].apply(lambda x: 'Sim' if x in valores_prio else 'Não')
+                    else:
+                        df_lev['PRIORIDADE'] = 'Não'
+                        
+                    st.session_state.col_prioridade_lev = coluna_prio
+                else:
+                    df_lev['PRIORIDADE'] = 'Não'
+                    st.session_state.col_prioridade_lev = "Nenhuma"
 
                 if 'STATUS SAP' in df_lev.columns: df_lev = df_lev[~df_lev['STATUS SAP'].astype(str).str.strip().str.upper().isin(['CANC', 'FINL'])]
-                if 'TIPO NOTA' in df_lev.columns: df_lev['PRIORIDADE'] = df_lev['TIPO NOTA'].apply(lambda x: 'Sim' if str(x).strip().upper() in tipos_prioritarios_selecionados else 'Não')
-                else: df_lev['PRIORIDADE'] = 'Não'
-
                 df_list.append(df_lev)
                 
         if has_saneamento:
@@ -1333,16 +1364,25 @@ def view_roteirizador():
         if has_generica:
             with st.expander("🛠️ 4C. Filtros Iniciais - Base GENÉRICA", expanded=True):
                 df_gen = df_tasks[df_tasks['_ORIGEM_BASE'] == 'GENERICA'].copy()
-                st.info("💡 A base Genérica é flexível. Você pode escolher qual coluna define se uma obra é de Alta Prioridade.")
+                st.info("💡 A base Genérica é flexível. O sistema tenta adivinhar a prioridade, mas você pode alterar as regras abaixo.")
                 
                 col_c1, col_c2 = st.columns(2)
                 colunas_validas = [c for c in df_gen.columns if not c.startswith('_')]
                 
-                coluna_prio = col_c1.selectbox("Qual coluna define a prioridade?", ["Nenhuma"] + colunas_validas, key='prio_col_gen')
+                idx_default = 0
+                if 'TIPO NOTA' in colunas_validas:
+                    idx_default = colunas_validas.index('TIPO NOTA') + 1
+
+                coluna_prio = col_c1.selectbox("📌 1. Qual coluna define a prioridade?", ["Nenhuma"] + colunas_validas, index=idx_default, key='prio_col_gen')
                 
                 if coluna_prio != "Nenhuma":
                     valores_unicos = [str(x).strip() for x in df_gen[coluna_prio].unique() if pd.notna(x) and str(x).lower() != 'nan']
-                    valores_prio = col_c2.multiselect(f"Quais valores em '{coluna_prio}' indicam PRIORIDADE?", valores_unicos, key='prio_val_gen')
+                    
+                    default_prio = []
+                    if coluna_prio == 'TIPO NOTA':
+                        default_prio = [x for x in valores_unicos if x in TIPOS_PRIORITARIOS]
+
+                    valores_prio = col_c2.multiselect(f"🚨 2. Definir Obras PRIORITÁRIAS em '{coluna_prio}':", valores_unicos, default=default_prio, key='prio_val_gen')
                     
                     if valores_prio:
                         df_gen['PRIORIDADE'] = df_gen[coluna_prio].astype(str).apply(lambda x: 'Sim' if x.strip() in valores_prio else 'Não')
@@ -1414,7 +1454,6 @@ def view_roteirizador():
         qtd_erros_coords_finais = erros_coords_mask.sum()
         df_tasks = df_tasks[~erros_coords_mask]
         
-        # === CORREÇÃO: VERIFICADOR SEGURO DE NOMES PARA NÃO DELETAR DADOS DA GENÉRICA ===
         erros_nome = 0
         if 'NOME' not in df_tasks.columns:
             df_tasks['NOME'] = "SEM NOME"
@@ -1579,7 +1618,7 @@ def view_roteirizador():
             if has_generica: 
                 col_prioridade = st.session_state.get('col_prioridade_gen', "Nenhuma")
             elif has_levantamento: 
-                col_prioridade = "TIPO NOTA"
+                col_prioridade = st.session_state.get('col_prioridade_lev', "Nenhuma")
             else: 
                 col_prioridade = "Nenhuma"
 
