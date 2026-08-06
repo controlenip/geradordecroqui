@@ -1064,7 +1064,7 @@ def view_roteirizador():
                 st.plotly_chart(fig, use_container_width=True)
 
         # Atualizando o card verde do menu lateral (MESMO NO ESTADO CONCLUÍDO)
-        sidebar_html_placeholder.markdown(renderizar_painel_lateral(cap_por_eq_live, tot_obras_reais, tot_equipes, cap_total_estimada_live), unsafe_allow_html=True)
+        sidebar_html_placeholder.markdown(renderizar_painel_lateral(meta_exata_por_equipe, tot_obras_reais, tot_equipes_cadastradas, meta_global_exata), unsafe_allow_html=True)
         return 
 
     # ---------------------------------------------------------
