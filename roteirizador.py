@@ -864,36 +864,50 @@ def view_roteirizador():
             if b_name in obras_por_equipe:
                 obras_por_equipe[b_name] += qtd
                 
+        obras_faltantes = meta_global_exata - tot_obras_reais
+        obras_sobrando_na_planilha = st.session_state.get('tot_obras_nao_alocadas', 0)
         equipes_abaixo_meta = {k: v for k, v in obras_por_equipe.items() if v < meta_exata_por_equipe}
         
-        st.markdown(f'''
-        <div style="background-color: #f8fafc; color: #0f172a; padding: 15px; border-left: 5px solid #3b82f6; margin-bottom: 20px; border-radius: 4px; border: 1px solid #e2e8f0;">
-            <h4 style="margin-top: 0; color: #1e3a8a;">📊 Auditoria Matemática Exata: {obras_dia_meta} obras/dia × {dias_multiplicador * limite_periodos_meta} dias totais × {tot_equipes_cadastradas} equipes = {meta_global_exata} obras projetadas</h4>
-            <p style="margin-bottom: 10px;">O sistema rodou no modo matemático puro e ignorou bloqueios de tempo/distância. <b>Total Roteirizado: {tot_obras_reais} obras.</b></p>
-        ''', unsafe_allow_html=True)
-        
-        if equipes_abaixo_meta:
-            motivos = []
-            if tot_obras_reais < meta_global_exata:
-                motivos.append(f"<b>Planilha menor que a Capacidade ou Isolamento Geográfico:</b> A matemática abriu vaga para {meta_global_exata} obras. O sistema alocou {tot_obras_reais}. O que faltou é porque sua planilha acabou ou essas cidades são muito distantes da base para as regras territoriais configuradas.")
-                
-            detalhes_html = "".join([f"<li style='margin-bottom: 4px;'><b>{eq}</b>: Roteirizou {qtd} obras (Vaga para: {meta_exata_por_equipe}).</li>" for eq, qtd in equipes_abaixo_meta.items()])
+        if obras_faltantes > 0:
+            if obras_sobrando_na_planilha > 0:
+                dica_extra = f"<li><b>Obras Sobrando sem Equipe:</b> O sistema detectou que <b>{obras_sobrando_na_planilha} obras</b> tinham coordenadas válidas, mas ficaram de fora do roteamento. Isso quase sempre significa que as equipes não têm permissão para atuar na cidade dessas obras (verifique a Regra no Passo 1).</li>"
+            else:
+                dica_extra = "<li><b>Falta de Obras na Planilha:</b> Após o sistema limpar automaticamente as obras sem coordenadas, com status inválido, sem nome ou que <i>já possuíam data de despacho preenchida</i>, o seu banco de dados simplesmente esgotou antes de conseguir bater a meta operacional de todos os técnicos.</li>"
             
             st.markdown(f'''
-                <ul style="margin-bottom: 15px; color: #b91c1c;">
-                    {"".join([f"<li style='margin-bottom: 5px;'>{m}</li>" for m in motivos])}
+            <div style="background-color: #fff3cd; color: #856404; padding: 20px; border-left: 6px solid #ffeeba; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <h3 style="margin-top: 0; color: #856404; display: flex; align-items: center;"><span style="font-size: 24px; margin-right: 10px;">⚠️</span> Quadro de Aviso: Meta de Obras Não Atingida</h3>
+                <p style="font-size: 16px;">Você configurou o sistema para roteirizar <b>{meta_global_exata} obras</b> no total <i>({obras_dia_meta} obras/dia × {dias_multiplicador * limite_periodos_meta} dias × {tot_equipes_cadastradas} equipes)</i>.</p>
+                <p style="font-size: 16px;">O algoritmo conseguiu alocar apenas <b>{tot_obras_reais} obras</b> prontas para a rua. <br>
+                <span style="color: #d9534f; font-weight: bold; font-size: 18px;">❌ Faltaram {obras_faltantes} obras para atingir a quantidade desejada.</span></p>
+                <hr style="border-top: 1px solid #ffeeba; margin: 15px 0;">
+                <h4 style="margin-bottom: 10px; color: #856404;">🔍 Por que isso aconteceu e como corrigir?</h4>
+                <ul style="font-size: 14px; line-height: 1.6;">
+                    {dica_extra}
+                    <li><b>Regra Geográfica Restritiva (DICA DE OURO):</b> Se no <b>Passo 1</b> você escolheu a regra <i>"Por Municípios Atendidos"</i>, o sistema é rigoroso e só manda o técnico para as cidades exatas escritas na planilha. Para forçar o preenchimento da meta, troque a regra para <b>"Por Proximidade Geográfica (Ignora texto)"</b> e rode novamente. Assim, a IA vai puxar as obras mais próximas no raio que for necessário até a cota de todo mundo ficar cheia.</li>
+                    <li><b>Obras Agrupadas (Super Pontos):</b> Se várias obras ficavam exatamente na mesma coordenada, a IA unificou tudo num "Super Ponto". Isso diminui a contagem visual de pontos no mapa, embora as tarefas originais ainda estejam lá dentro.</li>
                 </ul>
-                <details>
-                    <summary style="cursor: pointer; font-weight: bold; padding: 5px; background: rgba(0,0,0,0.05); border-radius: 4px;">Ver Levantadores que ficaram abaixo da capacidade máxima ({len(equipes_abaixo_meta)} equipes)</summary>
-                    <ul style="margin-top: 10px;">
-                        {detalhes_html}
-                    </ul>
-                </details>
+            </div>
             ''', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<p style="color: #15803d; font-weight: bold;">✅ Alocação Exata Perfeita! 100% da cota que você escolheu foi preenchida na vírgula.</p>', unsafe_allow_html=True)
             
-        st.markdown('</div>', unsafe_allow_html=True)
+            if equipes_abaixo_meta:
+                detalhes_html = "".join([f"<li style='margin-bottom: 4px;'><b>{eq}</b>: Roteirizou {qtd} obras (Faltaram {meta_exata_por_equipe - qtd}).</li>" for eq, qtd in equipes_abaixo_meta.items()])
+                st.markdown(f'''
+                    <details style="margin-bottom: 20px;">
+                        <summary style="cursor: pointer; font-weight: bold; padding: 8px; background: rgba(0,0,0,0.05); border-radius: 4px;">Ver Equipes que ficaram com falta de obras no cronograma ({len(equipes_abaixo_meta)} equipes)</summary>
+                        <ul style="margin-top: 10px; color: #b91c1c;">
+                            {detalhes_html}
+                        </ul>
+                    </details>
+                ''', unsafe_allow_html=True)
+                
+        else:
+            st.markdown(f'''
+            <div style="background-color: #d4edda; color: #155724; padding: 15px; border-left: 5px solid #c3e6cb; margin-bottom: 20px; border-radius: 4px;">
+                <h4 style="margin-top: 0; margin-bottom: 5px;">✅ Meta de Despacho 100% Atingida!</h4>
+                <p style="margin: 0;">O sistema logístico preencheu perfeitamente a meta exata de <b>{meta_global_exata} obras</b> ({obras_dia_meta} obras/dia × {dias_multiplicador * limite_periodos_meta} dias × {tot_equipes_cadastradas} equipes).</p>
+            </div>
+            ''', unsafe_allow_html=True)
 
         cf_comb = st.session_state.config_financeira.get('custo_combustivel', 0.0)
         cf_cons = st.session_state.config_financeira.get('consumo_veiculo', 0.0)
