@@ -27,7 +27,7 @@ LOGO_PATH = "LOGO_NIP.png"
 icon_page = LOGO_PATH if os.path.exists(LOGO_PATH) else "⚡"
 
 st.set_page_config(
-    page_title="Roteirizador NIP v1.1",
+    page_title="Roteirizador NIP v1.2 - Obras & Rede",
     page_icon=icon_page,
     layout="wide",
     initial_sidebar_state="expanded"
@@ -181,8 +181,84 @@ def atualizar_status_via_df(df_principal, df_status, coluna_alvo):
     return df_principal
 
 # ==========================================
-# 4. TRATAMENTO DE SUPER PONTOS (AGORA DINÂMICO)
+# 4. MÓDULOS DE PROCESSAMENTO GEOGRÁFICO E REDE
 # ==========================================
+def extrair_lon_lat_kml(kml_text):
+    """Varre o XML e extrai todos os nós geográficos brutos do KML usando Regex de alta performance"""
+    coords = []
+    matches = re.findall(r'<coordinates>\s*(.*?)\s*</coordinates>', kml_text, re.DOTALL)
+    for match in matches:
+        points = match.strip().split()
+        for pt in points:
+            parts = pt.split(',')
+            if len(parts) >= 2:
+                try:
+                    lon = float(parts[0])
+                    lat = float(parts[1])
+                    if lat != 0.0 and lon != 0.0:
+                        coords.append((lon, lat))
+                except:
+                    pass
+    return coords
+
+def extrair_coordenadas_rede(uploaded_files):
+    """Lê arquivos KML/KMZ e retorna um DataFrame estruturado de nós da malha elétrica"""
+    coords_list = []
+    for f in uploaded_files:
+        file_bytes = f.getvalue()
+        if f.name.lower().endswith('.kmz'):
+            try:
+                with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+                    for zinfo in z.namelist():
+                        if zinfo.lower().endswith('.kml'):
+                            kml_data = z.read(zinfo).decode('utf-8', errors='ignore')
+                            coords_list.extend(extrair_lon_lat_kml(kml_data))
+            except Exception as e:
+                pass
+        elif f.name.lower().endswith('.kml'):
+            kml_data = file_bytes.decode('utf-8', errors='ignore')
+            coords_list.extend(extrair_lon_lat_kml(kml_data))
+    
+    if not coords_list:
+        return pd.DataFrame()
+    
+    df_rede = pd.DataFrame(coords_list, columns=['LONGITUDE', 'LATITUDE'])
+    df_rede = df_rede.dropna().drop_duplicates()
+    return df_rede
+
+def encontrar_rede_mais_proxima(df_tasks, df_rede):
+    """Algoritmo vetorial: Encontra a coordenada de rede elétrica mais próxima de cada obra"""
+    if df_rede.empty or df_tasks.empty:
+        return df_tasks
+    
+    rede_lats = df_rede['LATITUDE'].values
+    rede_lons = df_rede['LONGITUDE'].values
+    
+    nearest_lats = []
+    nearest_lons = []
+    nearest_dists = []
+    
+    for _, row in df_tasks.iterrows():
+        t_lat, t_lon = row.get('LATITUDE'), row.get('LONGITUDE')
+        if pd.isna(t_lat) or pd.isna(t_lon):
+            nearest_lats.append(np.nan)
+            nearest_lons.append(np.nan)
+            nearest_dists.append(np.nan)
+            continue
+            
+        # Numpy faz o Broadcast calculando a distancia de 1 obra pra toda a nuvem da rede simultaneamente
+        dists = haversine_vectorized(t_lat, t_lon, rede_lats, rede_lons)
+        min_idx = np.argmin(dists)
+        
+        nearest_dists.append(dists[min_idx] * 1000) # De KM para Metros
+        nearest_lats.append(rede_lats[min_idx])
+        nearest_lons.append(rede_lons[min_idx])
+        
+    df_tasks['DISTANCIA_REDE_METROS'] = nearest_dists
+    df_tasks['LATITUDE_REDE'] = nearest_lats
+    df_tasks['LONGITUDE_REDE'] = nearest_lons
+    return df_tasks
+
 def fundir_super_pontos(df_tasks, raio_metros=5):
     if df_tasks.empty or 'LATITUDE' not in df_tasks.columns or 'LONGITUDE' not in df_tasks.columns:
         return df_tasks, 0
@@ -210,10 +286,9 @@ def fundir_super_pontos(df_tasks, raio_metros=5):
             orig_rows = group.to_dict('records')
             row_base['_ORIGINAL_ROWS'] = orig_rows
             
-            # Unificador dinâmico que lê todas as colunas estranhas
             def safe_list_join(col_name):
                 itens = [str(x).strip() for x in group[col_name] if pd.notna(x) and str(x).lower() != 'nan']
-                itens_unicos = list(dict.fromkeys(itens)) # Remove duplicatas mantendo a ordem
+                itens_unicos = list(dict.fromkeys(itens))
                 return " | ".join(itens_unicos) if itens_unicos else "-"
             
             for col in group.columns:
@@ -262,8 +337,6 @@ def is_endereco_lixo(endereco):
 def geocode_endereco_nominatim(endereco, municipio):
     if pd.isna(endereco) or str(endereco).strip() == "" or pd.isna(municipio): 
         return np.nan, np.nan
-        
-    # ACELERADOR: Corta a busca imediatamente se o endereço for inútil para o satélite
     if is_endereco_lixo(endereco):
         return np.nan, np.nan
         
@@ -429,7 +502,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
         if '_ORIGINAL_ROWS' in row and isinstance(row['_ORIGINAL_ROWS'], list):
             for orig in row['_ORIGINAL_ROWS']:
                 new_row = orig.copy()
-                for vrp_col in ['NOME_DIA', 'ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'HORA_INICIO', 'HORA_FIM', 'SUPER_PONTO', 'BASE_ATRIBUIDA', 'PRIORIDADE']:
+                for vrp_col in ['NOME_DIA', 'ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'HORA_INICIO', 'HORA_FIM', 'SUPER_PONTO', 'BASE_ATRIBUIDA', 'PRIORIDADE', 'DISTANCIA_REDE_METROS', 'LATITUDE_REDE', 'LONGITUDE_REDE']:
                     if vrp_col in row:
                         new_row[vrp_col] = row[vrp_col]
                 unpacked_rows.append(new_row)
@@ -470,7 +543,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
             elif any(x in col_name_upper for x in ['PROTOCOLO', 'MUNICIPIO', 'BASE', 'LOCALIDADE']): ws.column_dimensions[col_letter].width = 25.0
             else: ws.column_dimensions[col_letter].width = 18.0
                 
-            if col_name_upper in ['NOME_DIA', 'ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE', 'HORA_INICIO', 'HORA_FIM']:
+            if col_name_upper in ['NOME_DIA', 'ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE', 'HORA_INICIO', 'HORA_FIM', 'DISTANCIA_REDE_METROS', 'LATITUDE_REDE', 'LONGITUDE_REDE']:
                 col_types[col_idx] = center_align
             else:
                 col_types[col_idx] = left_align
@@ -537,6 +610,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
 <Document>
   <name>{doc_name}</name>
   <Style id="linha-rota-contorno"><LineStyle><color>ff000000</color><width>8</width></LineStyle></Style>
+  <Style id="linha-ligacao-rede"><LineStyle><color>8800ffff</color><width>2</width></LineStyle></Style>
   <Style id="icon-blue"><IconStyle><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/blu-blank.png</href></Icon><hotSpot x="32" xunits="pixels" y="64" yunits="insetPixels"/></IconStyle></Style>
   <Style id="icon-red"><IconStyle><scale>1.3</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/red-blank.png</href></Icon><hotSpot x="32" xunits="pixels" y="64" yunits="insetPixels"/></IconStyle></Style>
   <Style id="icon-green"><IconStyle><scale>1.2</scale><Icon><href>https://maps.google.com/mapfiles/kml/shapes/homegardenbusiness.png</href></Icon></IconStyle></Style>
@@ -600,11 +674,17 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                             style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
                         
                         dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
+                        dist_rede = r.get('DISTANCIA_REDE_METROS')
+                        
                         extra_rows_list = []
                         for c in cols_exibir:
                             if c.upper() not in ['PROTOCOLO', 'NOME_DIA', 'SEMANA']:
                                 val_html = formata_campo_html(r.get(c, ''))
                                 extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
+                                
+                        if pd.notna(dist_rede):
+                            extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>Rede Mais Próxima:</td><td style='padding:3px 6px; color:#17a2b8; font-weight:bold;'>{dist_rede:.1f} Metros</td></tr>")
+
                         extra_rows = "".join(extra_rows_list)
                         prot_html = formata_campo_html(r.get('PROTOCOLO', 'N/A'))
 
@@ -624,6 +704,14 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         </div>"""
                         kml_lines.append(f'        <Placemark><name>{nome_ponto}</name><description><![CDATA[{popup_html}]]></description><styleUrl>{style_url}</styleUrl><Point><coordinates>{lon},{lat},0</coordinates></Point></Placemark>')
                         
+                        # --- LINHA GUIA PARA A REDE ELÉTRICA MAIS PRÓXIMA ---
+                        rede_lat = r.get('LATITUDE_REDE')
+                        rede_lon = r.get('LONGITUDE_REDE')
+                        if pd.notna(rede_lat) and pd.notna(rede_lon):
+                            rede_lat_str = str(rede_lat).replace(',', '.')
+                            rede_lon_str = str(rede_lon).replace(',', '.')
+                            kml_lines.append(f'        <Placemark><name>Guia de Rede: {dist_rede:.1f}m</name><styleUrl>#linha-ligacao-rede</styleUrl><LineString><tessellate>1</tessellate><coordinates>{lon},{lat},0 {rede_lon_str},{rede_lat_str},0</coordinates></LineString></Placemark>')
+
                     kml_str_coords = "\n".join(coords_linha_kml)
                     if kml_str_coords.strip():
                         kml_lines.append(f'        <Placemark><name>Contorno Rota</name><styleUrl>#linha-rota-contorno</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{kml_str_coords}\n            </coordinates></LineString></Placemark>')
@@ -672,11 +760,17 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         style_url = "#icon-red" if r.get('PRIORIDADE') == "Sim" else "#icon-blue"
                     
                     dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
+                    dist_rede = r.get('DISTANCIA_REDE_METROS')
+                    
                     extra_rows_list = []
                     for c in cols_exibir:
                         if c.upper() not in ['PROTOCOLO', 'NOME_DIA', 'SEMANA']:
                             val_html = formata_campo_html(r.get(c, ''))
                             extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
+                            
+                    if pd.notna(dist_rede):
+                        extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>Rede Mais Próxima:</td><td style='padding:3px 6px; color:#17a2b8; font-weight:bold;'>{dist_rede:.1f} Metros</td></tr>")
+
                     extra_rows = "".join(extra_rows_list)
                     prot_html = formata_campo_html(r.get('PROTOCOLO', 'N/A'))
 
@@ -696,6 +790,14 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     </div>"""
                     kml_lines.append(f'        <Placemark><name>{nome_ponto}</name><description><![CDATA[{popup_html}]]></description><styleUrl>{style_url}</styleUrl><Point><coordinates>{lon},{lat},0</coordinates></Point></Placemark>')
                     
+                    # --- LINHA GUIA PARA A REDE ELÉTRICA MAIS PRÓXIMA ---
+                    rede_lat = r.get('LATITUDE_REDE')
+                    rede_lon = r.get('LONGITUDE_REDE')
+                    if pd.notna(rede_lat) and pd.notna(rede_lon):
+                        rede_lat_str = str(rede_lat).replace(',', '.')
+                        rede_lon_str = str(rede_lon).replace(',', '.')
+                        kml_lines.append(f'        <Placemark><name>Guia de Rede: {dist_rede:.1f}m</name><styleUrl>#linha-ligacao-rede</styleUrl><LineString><tessellate>1</tessellate><coordinates>{lon},{lat},0 {rede_lon_str},{rede_lat_str},0</coordinates></LineString></Placemark>')
+
                 kml_str_coords = "\n".join(coords_linha_kml)
                 if kml_str_coords.strip():
                     kml_lines.append(f'        <Placemark><name>Contorno Rota</name><styleUrl>#linha-rota-contorno</styleUrl><LineString><tessellate>1</tessellate><coordinates>\n{kml_str_coords}\n            </coordinates></LineString></Placemark>')
@@ -725,7 +827,7 @@ def view_roteirizador():
     status_exec = st.session_state.vrp_status
     is_done = st.session_state.roteamento_concluido
 
-    st.markdown("<h1 class='brand-title'>Plataforma Roteirizadora NIP v1.1</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 class='brand-title'>Plataforma Roteirizadora NIP v1.2</h1>", unsafe_allow_html=True)
 
     # ---------------------------------------------------------
     # UI DE NAVEGAÇÃO E SIDEBAR (SEMPRE VISÍVEL)
@@ -992,12 +1094,17 @@ def view_roteirizador():
                         pop_prio_txt = "🚨 OBRA PRIORITÁRIA" if r.get('PRIORIDADE') == "Sim" else "📍 Atendimento Padrão"
                     
                     dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
+                    dist_rede = r.get('DISTANCIA_REDE_METROS')
                     
                     extra_rows_list = []
                     for c in colunas_exibir:
                         if c.upper() != 'PROTOCOLO' and c.upper() != 'NOME_DIA':
                             val_html = formata_campo_html(r.get(c, ''))
                             extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555; vertical-align:top; width:35%;'>{html.escape(str(c))}:</td><td style='padding:3px 6px; color:#333;'>{val_html}</td></tr>")
+                    
+                    if pd.notna(dist_rede):
+                        extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>Rede Mais Próxima:</td><td style='padding:3px 6px; color:#17a2b8; font-weight:bold;'>{dist_rede:.1f} Metros</td></tr>")
+
                     extra_rows = "".join(extra_rows_list)
 
                     prot_html = formata_campo_html(r.get('PROTOCOLO', 'N/A'))
@@ -1153,6 +1260,11 @@ def view_roteirizador():
             with st.container(border=True):
                 status_file = st.file_uploader("4️⃣ Planilha Atualizada SharePoint (Opcional)", type=["xlsx", "xls"])
             
+            # --- NOVO UPLOADER: MALHA ELÉTRICA KMZ/KML ---
+            with st.container(border=True):
+                rede_files = st.file_uploader("5️⃣ Malha Elétrica de Referência (KMZ/KML) - P/ Ligar Obra à Rede", type=["kmz", "kml"], accept_multiple_files=True, key="rede_uploader")
+                st.caption("⚡ A IA varrerá os milhares de postes e ativos nesses mapas e guiará o técnico até a rede mais próxima no KML final.")
+
             df_status_upload = pd.DataFrame()
             coluna_status_selecionada = None
             if status_file:
@@ -1310,9 +1422,6 @@ def view_roteirizador():
             if not df_status_upload.empty and coluna_status_selecionada:
                 df_tasks = atualizar_status_via_df(df_tasks, df_status_upload, coluna_status_selecionada)
 
-            # ==========================================
-            # NOVO FILTRO: IGNORAR OBRAS JÁ DESPACHADAS
-            # ==========================================
             if 'DATA DESPACHO CAMPO' in df_tasks.columns:
                 mask_despacho = df_tasks['DATA DESPACHO CAMPO'].notna() & \
                                 (df_tasks['DATA DESPACHO CAMPO'].astype(str).str.strip() != '') & \
@@ -1354,7 +1463,6 @@ def view_roteirizador():
                         idx_default = i + 1
                         break
                         
-                # === MELHORIA AQUI: O SELETOR DE COLUNA AGORA É DINÂMICO PARA A BASE DE LEVANTAMENTO ===
                 coluna_prio = c_filt2.selectbox("📌 1. Qual coluna define a prioridade?", ["Nenhuma"] + colunas_validas, index=idx_default, key='prio_col_lev_din')
                 
                 if coluna_prio != "Nenhuma":
@@ -1656,6 +1764,17 @@ def view_roteirizador():
             if tipo_periodo == "Semana" and not dias_semana_selecionados:
                 st.error("Selecione os dias da semana na barra lateral antes de continuar.")
                 return
+
+            # --- LÓGICA DE CRUZAMENTO COM A MALHA ELÉTRICA (KMZ) ANTES DE ROTEIRIZAR ---
+            df_rede_kml = pd.DataFrame()
+            if 'rede_files' in locals() and rede_files:
+                with st.spinner("🗺️ Analisando e extraindo a malha elétrica dos arquivos KMZ/KML..."):
+                    df_rede_kml = extrair_coordenadas_rede(rede_files)
+                    
+                if not df_rede_kml.empty:
+                    with st.spinner(f"⚡ Encontrando a rede elétrica mais próxima para as {len(df_tasks_alocadas)} obras prontas..."):
+                        df_tasks_alocadas = encontrar_rede_mais_proxima(df_tasks_alocadas, df_rede_kml)
+                        st.success(f"✅ {len(df_rede_kml)} nós de rede mapeados! O KML vai traçar uma linha-guia visual até a rede mais próxima.")
 
             st.session_state.tarefas_alocadas_inicialmente = len(df_tasks_alocadas)
             st.session_state.bases_records = bases_records
