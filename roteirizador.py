@@ -184,22 +184,78 @@ def atualizar_status_via_df(df_principal, df_status, coluna_alvo):
 # 4. MÓDULOS DE PROCESSAMENTO GEOGRÁFICO E REDE
 # ==========================================
 def extrair_lon_lat_kml(kml_text):
-    """Varre o XML e extrai todos os nós geográficos brutos do KML usando Regex de alta performance"""
+    """Varre o XML e extrai nós geográficos APENAS de Redes Primárias, Secundárias e Transformadores"""
     coords = []
-    matches = re.findall(r'<coordinates>\s*(.*?)\s*</coordinates>', kml_text, re.DOTALL)
-    for match in matches:
-        points = match.strip().split()
-        for pt in points:
-            parts = pt.split(',')
-            if len(parts) >= 2:
-                try:
-                    lon = float(parts[0])
-                    lat = float(parts[1])
-                    if lat != 0.0 and lon != 0.0:
-                        coords.append((lon, lat))
-                except:
-                    pass
-    return coords
+    
+    # Padrões que identificam Redes e Transformadores (ignora postes, chaves, caixas, etc)
+    padrao_alvo = re.compile(r'prim[aá]ri|secund[aá]ri|trafo|transformador|_pri|_sec|\bpri\b|\bsec\b|\bmt\b|\bbt\b', re.IGNORECASE)
+    
+    # 1. Identificar Styles/StyleMaps que pertencem aos alvos
+    target_styles = set()
+    # Busca em <Style>
+    for style_id, style_content in re.findall(r'<Style\s+id="([^"]+)"(.*?</Style>)', kml_text, re.DOTALL | re.IGNORECASE):
+        if padrao_alvo.search(style_id) or padrao_alvo.search(style_content):
+            target_styles.add(style_id)
+            
+    # Busca em <StyleMap>
+    for stylemap_id, stylemap_content in re.findall(r'<StyleMap\s+id="([^"]+)"(.*?</StyleMap>)', kml_text, re.DOTALL | re.IGNORECASE):
+        if padrao_alvo.search(stylemap_id) or padrao_alvo.search(stylemap_content):
+            target_styles.add(stylemap_id)
+
+    # 2. Analisar cada Placemark isoladamente
+    placemarks = re.findall(r'<Placemark.*?</Placemark>', kml_text, re.DOTALL | re.IGNORECASE)
+    
+    for pm in placemarks:
+        is_target = False
+        
+        # Checa se o texto/nome do Placemark possui a palavra-chave
+        if padrao_alvo.search(pm):
+            is_target = True
+        else:
+            # Checa se o Placemark usa um Style de Rede/Trafo
+            style_urls = re.findall(r'<styleUrl>#?(.*?)</styleUrl>', pm, re.IGNORECASE)
+            for url in style_urls:
+                if url in target_styles or padrao_alvo.search(url):
+                    is_target = True
+                    break
+                    
+        # Se for Rede Primária, Secundária ou Trafo, extrai as coordenadas
+        if is_target:
+            matches = re.findall(r'<coordinates>\s*(.*?)\s*</coordinates>', pm, re.DOTALL)
+            for match in matches:
+                points = match.strip().split()
+                for pt in points:
+                    parts = pt.split(',')
+                    if len(parts) >= 2:
+                        try:
+                            lon = float(parts[0])
+                            lat = float(parts[1])
+                            if lat != 0.0 and lon != 0.0:
+                                coords.append((lon, lat))
+                        except:
+                            pass
+                            
+    # 3. Fallback: Se o KML agrupa por <Folder> e não usa Styles explícitos
+    if not coords:
+        folders_raw = re.split(r'<Folder.*?>', kml_text, flags=re.IGNORECASE)
+        for f_raw in folders_raw:
+            # Olha o nome da pasta (geralmente nos primeiros 200 caracteres)
+            if padrao_alvo.search(f_raw[:200]): 
+                matches = re.findall(r'<coordinates>\s*(.*?)\s*</coordinates>', f_raw, re.DOTALL)
+                for match in matches:
+                    points = match.strip().split()
+                    for pt in points:
+                        parts = pt.split(',')
+                        if len(parts) >= 2:
+                            try:
+                                lon = float(parts[0])
+                                lat = float(parts[1])
+                                if lat != 0.0 and lon != 0.0:
+                                    coords.append((lon, lat))
+                            except:
+                                pass
+
+    return list(set(coords)) # Remove duplicatas para otimizar o Numpy
 
 def extrair_coordenadas_rede(uploaded_files):
     """Lê arquivos KML/KMZ e retorna um DataFrame estruturado de nós da malha elétrica"""
@@ -337,6 +393,7 @@ def is_endereco_lixo(endereco):
 def geocode_endereco_nominatim(endereco, municipio):
     if pd.isna(endereco) or str(endereco).strip() == "" or pd.isna(municipio): 
         return np.nan, np.nan
+        
     if is_endereco_lixo(endereco):
         return np.nan, np.nan
         
@@ -1263,7 +1320,7 @@ def view_roteirizador():
             # --- NOVO UPLOADER: MALHA ELÉTRICA KMZ/KML ---
             with st.container(border=True):
                 rede_files = st.file_uploader("5️⃣ Malha Elétrica de Referência (KMZ/KML) - P/ Ligar Obra à Rede", type=["kmz", "kml"], accept_multiple_files=True, key="rede_uploader")
-                st.caption("⚡ A IA varrerá os milhares de postes e ativos nesses mapas e guiará o técnico até a rede mais próxima no KML final.")
+                st.caption("⚡ A IA varrerá as redes e transformadores nestes mapas e guiará o técnico no KML final ignorando outros componentes.")
 
             df_status_upload = pd.DataFrame()
             coluna_status_selecionada = None
