@@ -184,42 +184,29 @@ def atualizar_status_via_df(df_principal, df_status, coluna_alvo):
 # 4. MÓDULOS DE PROCESSAMENTO GEOGRÁFICO E REDE
 # ==========================================
 def extrair_lon_lat_kml(kml_text):
-    """Varre o XML e extrai nós geográficos APENAS de Redes Primárias, Secundárias e Transformadores"""
     coords = []
-    
-    # Padrões que identificam Redes e Transformadores (ignora postes, chaves, caixas, etc)
     padrao_alvo = re.compile(r'prim[aá]ri|secund[aá]ri|trafo|transformador|_pri|_sec|\bpri\b|\bsec\b|\bmt\b|\bbt\b', re.IGNORECASE)
-    
-    # 1. Identificar Styles/StyleMaps que pertencem aos alvos
     target_styles = set()
-    # Busca em <Style>
     for style_id, style_content in re.findall(r'<Style\s+id="([^"]+)"(.*?</Style>)', kml_text, re.DOTALL | re.IGNORECASE):
         if padrao_alvo.search(style_id) or padrao_alvo.search(style_content):
             target_styles.add(style_id)
             
-    # Busca em <StyleMap>
     for stylemap_id, stylemap_content in re.findall(r'<StyleMap\s+id="([^"]+)"(.*?</StyleMap>)', kml_text, re.DOTALL | re.IGNORECASE):
         if padrao_alvo.search(stylemap_id) or padrao_alvo.search(stylemap_content):
             target_styles.add(stylemap_id)
 
-    # 2. Analisar cada Placemark isoladamente
     placemarks = re.findall(r'<Placemark.*?</Placemark>', kml_text, re.DOTALL | re.IGNORECASE)
     
     for pm in placemarks:
         is_target = False
-        
-        # Checa se o texto/nome do Placemark possui a palavra-chave
         if padrao_alvo.search(pm):
             is_target = True
         else:
-            # Checa se o Placemark usa um Style de Rede/Trafo
             style_urls = re.findall(r'<styleUrl>#?(.*?)</styleUrl>', pm, re.IGNORECASE)
             for url in style_urls:
                 if url in target_styles or padrao_alvo.search(url):
                     is_target = True
                     break
-                    
-        # Se for Rede Primária, Secundária ou Trafo, extrai as coordenadas
         if is_target:
             matches = re.findall(r'<coordinates>\s*(.*?)\s*</coordinates>', pm, re.DOTALL)
             for match in matches:
@@ -235,11 +222,9 @@ def extrair_lon_lat_kml(kml_text):
                         except:
                             pass
                             
-    # 3. Fallback: Se o KML agrupa por <Folder> e não usa Styles explícitos
     if not coords:
         folders_raw = re.split(r'<Folder.*?>', kml_text, flags=re.IGNORECASE)
         for f_raw in folders_raw:
-            # Olha o nome da pasta (geralmente nos primeiros 200 caracteres)
             if padrao_alvo.search(f_raw[:200]): 
                 matches = re.findall(r'<coordinates>\s*(.*?)\s*</coordinates>', f_raw, re.DOTALL)
                 for match in matches:
@@ -254,11 +239,9 @@ def extrair_lon_lat_kml(kml_text):
                                     coords.append((lon, lat))
                             except:
                                 pass
-
-    return list(set(coords)) # Remove duplicatas para otimizar o Numpy
+    return list(set(coords)) 
 
 def extrair_coordenadas_rede(uploaded_files):
-    """Lê arquivos KML/KMZ e retorna um DataFrame estruturado de nós da malha elétrica"""
     coords_list = []
     for f in uploaded_files:
         file_bytes = f.getvalue()
@@ -283,7 +266,6 @@ def extrair_coordenadas_rede(uploaded_files):
     return df_rede
 
 def encontrar_rede_mais_proxima(df_tasks, df_rede, vao_medio):
-    """Algoritmo vetorial: Encontra a distância até a rede e estipula a quantidade de postes previstos"""
     if df_rede.empty or df_tasks.empty:
         return df_tasks
     
@@ -304,12 +286,11 @@ def encontrar_rede_mais_proxima(df_tasks, df_rede, vao_medio):
             nearest_postes.append(np.nan)
             continue
             
-        # Numpy faz o Broadcast calculando a distancia de 1 obra pra toda a nuvem da rede simultaneamente
         dists = haversine_vectorized(t_lat, t_lon, rede_lats, rede_lons)
         min_idx = np.argmin(dists)
         
-        dist_metros = dists[min_idx] * 1000 # De KM para Metros
-        postes = int(dist_metros // vao_medio) # Calcula a quantidade estimada de postes
+        dist_metros = dists[min_idx] * 1000 
+        postes = int(dist_metros // vao_medio) 
         
         nearest_dists.append(dist_metros)
         nearest_postes.append(postes)
@@ -1972,21 +1953,57 @@ def view_roteirizador():
                         tem_prio = any(x.get('PRIORIDADE') == 'Sim' for x in lista)
                         rep = lista[0].copy()
                         rep['PRIORIDADE'] = 'Sim' if tem_prio else 'Não'
+                        
+                        # ----- IDENTIFICANDO O MUNICÍPIO DO MACRO-PONTO -----
+                        mun_raw = rep.get('MUNICIPIO', rep.get('CIDADE', 'DESCONHECIDO'))
+                        if pd.notna(mun_raw) and str(mun_raw).strip() != '':
+                            rep['MUN_LIMPO'] = normalizar_municipios(pd.Series([mun_raw])).iloc[0]
+                        else:
+                            rep['MUN_LIMPO'] = 'DESCONHECIDO'
+                            
                         rep['_sub_obras'] = lista
                         macro_obras.append(rep)
 
-                    prio_macros = [m for m in macro_obras if m['PRIORIDADE'] == 'Sim']
-                    comum_macros = [m for m in macro_obras if m['PRIORIDADE'] != 'Sim']
-                    
+                    # ----- LÓGICA DE ORDENAÇÃO: MUNICÍPIOS COM PRIORIDADES PRIMEIRO -----
+                    macros_by_mun = {}
+                    for m in macro_obras:
+                        mun = m['MUN_LIMPO']
+                        if mun not in macros_by_mun: macros_by_mun[mun] = []
+                        macros_by_mun[mun].append(m)
+
+                    mun_stats = []
+                    for mun, m_list in macros_by_mun.items():
+                        prio_count = sum(1 for x in m_list if x['PRIORIDADE'] == 'Sim')
+                        total_count = len(m_list)
+                        mun_stats.append({
+                            'mun': mun,
+                            'prio_count': prio_count,
+                            'total_count': total_count
+                        })
+
+                    # Ordena: Municípios com prioridade (True) vêm primeiro, depois desempata por qtd de prioridades
+                    mun_stats.sort(key=lambda x: (x['prio_count'] > 0, x['prio_count'], x['total_count']), reverse=True)
+
                     ordered_macros = []
-                    if prio_macros:
-                        ordered_macros.extend(resolver_tsp_ortools(prio_macros, base_lat, base_lon, cfg['url_osrm_base']))
-                    if comum_macros:
-                        ordered_macros.extend(resolver_tsp_ortools(comum_macros, base_lat, base_lon, cfg['url_osrm_base']))
+                    for stat in mun_stats:
+                        mun = stat['mun']
+                        m_list = macros_by_mun[mun]
+                        
+                        prio_macros = [m for m in m_list if m['PRIORIDADE'] == 'Sim']
+                        comum_macros = [m for m in m_list if m['PRIORIDADE'] != 'Sim']
+                        
+                        # Processa e engata no OR-Tools de forma agrupada por município
+                        if prio_macros:
+                            ordered_macros.extend(resolver_tsp_ortools(prio_macros, base_lat, base_lon, cfg['url_osrm_base']))
+                        if comum_macros:
+                            ordered_macros.extend(resolver_tsp_ortools(comum_macros, base_lat, base_lon, cfg['url_osrm_base']))
                         
                     ordered_tasks = []
                     for macro in ordered_macros:
                         subs = sorted(macro['_sub_obras'], key=lambda x: 0 if x.get('PRIORIDADE') == 'Sim' else 1)
+                        for s in subs:
+                            # Injeta a TAG de município para rastrearmos na quebra do dia
+                            s['MUN_LIMPO_CALC'] = macro['MUN_LIMPO']
                         ordered_tasks.extend(subs)
                     
                     rotas_flat = []
@@ -1994,6 +2011,7 @@ def view_roteirizador():
                     semana_atual = 1
                     dia_da_semana = 1
                     obras_no_periodo_macro = 0
+                    mun_anterior = None # 🔴 Variável rastreadora de ciclo
                     
                     agora_dt = datetime.now()
                     data_base_inicio = agora_dt.replace(hour=8, minute=0, second=0, microsecond=0)
@@ -2011,6 +2029,7 @@ def view_roteirizador():
                     estado = iniciar_dia(dia_absoluto)
                     
                     for obra in ordered_tasks:
+                        mun_atual = obra.get('MUN_LIMPO_CALC', 'DESCONHECIDO')
                         qtd_real = len(obra.get('_ORIGINAL_ROWS', [1])) if isinstance(obra.get('_ORIGINAL_ROWS'), list) else 1
                         
                         viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
@@ -2044,8 +2063,11 @@ def view_roteirizador():
                         
                         virar_dia = False
                         
+                        # 🔴 SE O DIA ENCHEU, OU SE A CIDADE MUDOU NO MEIO DO EXPEDIENTE: QUEBRA!
                         if obras_no_periodo_macro >= cfg['obras_por_dia']:
                             virar_dia = True
+                        elif mun_anterior is not None and mun_atual != mun_anterior and estado['obras_hoje'] > 0:
+                            virar_dia = True 
                                 
                         if virar_dia:
                             dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
@@ -2072,6 +2094,7 @@ def view_roteirizador():
                                     
                             estado = iniciar_dia(dia_absoluto)
                             
+                            # Recalcula a viagem partindo da Base limpa para o novo dia
                             viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
                             if viagem_km < 0.05 and estado['obras_hoje'] > 0:
                                 viagem_min = 0.0
@@ -2097,6 +2120,8 @@ def view_roteirizador():
                         estado['obras_hoje'] += qtd_real
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
+                        
+                        mun_anterior = mun_atual # 🔴 Grava o município atual para a próxima volta do laço
 
                     if estado['obras_hoje'] > 0:
                         dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
