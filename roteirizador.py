@@ -1981,7 +1981,6 @@ def view_roteirizador():
                             'total_count': total_count
                         })
 
-                    # Ordena: Municípios com prioridade (True) vêm primeiro, depois desempata por qtd de prioridades
                     mun_stats.sort(key=lambda x: (x['prio_count'] > 0, x['prio_count'], x['total_count']), reverse=True)
 
                     ordered_macros = []
@@ -1992,7 +1991,6 @@ def view_roteirizador():
                         prio_macros = [m for m in m_list if m['PRIORIDADE'] == 'Sim']
                         comum_macros = [m for m in m_list if m['PRIORIDADE'] != 'Sim']
                         
-                        # Processa e engata no OR-Tools de forma agrupada por município
                         if prio_macros:
                             ordered_macros.extend(resolver_tsp_ortools(prio_macros, base_lat, base_lon, cfg['url_osrm_base']))
                         if comum_macros:
@@ -2002,7 +2000,6 @@ def view_roteirizador():
                     for macro in ordered_macros:
                         subs = sorted(macro['_sub_obras'], key=lambda x: 0 if x.get('PRIORIDADE') == 'Sim' else 1)
                         for s in subs:
-                            # Injeta a TAG de município para rastrearmos na quebra do dia
                             s['MUN_LIMPO_CALC'] = macro['MUN_LIMPO']
                         ordered_tasks.extend(subs)
                     
@@ -2011,7 +2008,7 @@ def view_roteirizador():
                     semana_atual = 1
                     dia_da_semana = 1
                     obras_no_periodo_macro = 0
-                    mun_anterior = None # 🔴 Variável rastreadora de ciclo
+                    mun_anterior = None
                     
                     agora_dt = datetime.now()
                     data_base_inicio = agora_dt.replace(hour=8, minute=0, second=0, microsecond=0)
@@ -2022,6 +2019,7 @@ def view_roteirizador():
                             'lat': base_lat, 'lon': base_lon,
                             'time': data_base_inicio + pd.Timedelta(days=dia_abs - 1),
                             'obras_hoje': 0,
+                            'prio_hoje': 0, # <-- Monitora as prioridades do dia
                             'km_hoje': 0.0,
                             'lunch': False
                         }
@@ -2031,6 +2029,7 @@ def view_roteirizador():
                     for obra in ordered_tasks:
                         mun_atual = obra.get('MUN_LIMPO_CALC', 'DESCONHECIDO')
                         qtd_real = len(obra.get('_ORIGINAL_ROWS', [1])) if isinstance(obra.get('_ORIGINAL_ROWS'), list) else 1
+                        qtd_prio_atual = qtd_real if obra.get('PRIORIDADE') == 'Sim' else 0
                         
                         viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
                         
@@ -2063,8 +2062,16 @@ def view_roteirizador():
                         
                         virar_dia = False
                         
+                        # --- LÓGICA DE LIMITE ELÁSTICO PARA PRIORIDADES ---
+                        prio_acumulada = estado.get('prio_hoje', 0) + qtd_prio_atual
+                        limite_diario_atual = cfg['obras_por_dia']
+                        
+                        # Se as notas prioritárias no dia atual excederem 3, agrupamos mais obras
+                        if prio_acumulada > 3:
+                            limite_diario_atual += 10 # Bônus de tolerância de +10 obras (ajustável)
+                        
                         # 🔴 SE O DIA ENCHEU, OU SE A CIDADE MUDOU NO MEIO DO EXPEDIENTE: QUEBRA!
-                        if obras_no_periodo_macro >= cfg['obras_por_dia']:
+                        if obras_no_periodo_macro >= limite_diario_atual:
                             virar_dia = True
                         elif mun_anterior is not None and mun_atual != mun_anterior and estado['obras_hoje'] > 0:
                             virar_dia = True 
@@ -2093,8 +2100,8 @@ def view_roteirizador():
                                     dia_da_semana = 1
                                     
                             estado = iniciar_dia(dia_absoluto)
+                            prio_acumulada = qtd_prio_atual # Reseta a contagem para o novo dia
                             
-                            # Recalcula a viagem partindo da Base limpa para o novo dia
                             viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
                             if viagem_km < 0.05 and estado['obras_hoje'] > 0:
                                 viagem_min = 0.0
@@ -2118,10 +2125,11 @@ def view_roteirizador():
                         estado['lon'] = obra['LONGITUDE']
                         estado['time'] = fim_previsto
                         estado['obras_hoje'] += qtd_real
+                        estado['prio_hoje'] = prio_acumulada # Atualiza as prioridades do dia
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
                         
-                        mun_anterior = mun_atual # 🔴 Grava o município atual para a próxima volta do laço
+                        mun_anterior = mun_atual 
 
                     if estado['obras_hoje'] > 0:
                         dist_ret = haversine_vectorized(estado['lat'], estado['lon'], base_lat, base_lon)
