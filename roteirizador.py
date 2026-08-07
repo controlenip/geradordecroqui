@@ -282,8 +282,8 @@ def extrair_coordenadas_rede(uploaded_files):
     df_rede = df_rede.dropna().drop_duplicates()
     return df_rede
 
-def encontrar_rede_mais_proxima(df_tasks, df_rede):
-    """Algoritmo vetorial: Encontra a coordenada de rede elétrica mais próxima de cada obra"""
+def encontrar_rede_mais_proxima(df_tasks, df_rede, vao_medio):
+    """Algoritmo vetorial: Encontra a distância até a rede e estipula a quantidade de postes previstos"""
     if df_rede.empty or df_tasks.empty:
         return df_tasks
     
@@ -293,6 +293,7 @@ def encontrar_rede_mais_proxima(df_tasks, df_rede):
     nearest_lats = []
     nearest_lons = []
     nearest_dists = []
+    nearest_postes = []
     
     for _, row in df_tasks.iterrows():
         t_lat, t_lon = row.get('LATITUDE'), row.get('LONGITUDE')
@@ -300,17 +301,23 @@ def encontrar_rede_mais_proxima(df_tasks, df_rede):
             nearest_lats.append(np.nan)
             nearest_lons.append(np.nan)
             nearest_dists.append(np.nan)
+            nearest_postes.append(np.nan)
             continue
             
         # Numpy faz o Broadcast calculando a distancia de 1 obra pra toda a nuvem da rede simultaneamente
         dists = haversine_vectorized(t_lat, t_lon, rede_lats, rede_lons)
         min_idx = np.argmin(dists)
         
-        nearest_dists.append(dists[min_idx] * 1000) # De KM para Metros
+        dist_metros = dists[min_idx] * 1000 # De KM para Metros
+        postes = int(dist_metros // vao_medio) # Calcula a quantidade estimada de postes
+        
+        nearest_dists.append(dist_metros)
+        nearest_postes.append(postes)
         nearest_lats.append(rede_lats[min_idx])
         nearest_lons.append(rede_lons[min_idx])
         
     df_tasks['DISTANCIA_REDE_METROS'] = nearest_dists
+    df_tasks['POSTES PREVISTOS'] = nearest_postes
     df_tasks['LATITUDE_REDE'] = nearest_lats
     df_tasks['LONGITUDE_REDE'] = nearest_lons
     return df_tasks
@@ -559,7 +566,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
         if '_ORIGINAL_ROWS' in row and isinstance(row['_ORIGINAL_ROWS'], list):
             for orig in row['_ORIGINAL_ROWS']:
                 new_row = orig.copy()
-                for vrp_col in ['NOME_DIA', 'ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'HORA_INICIO', 'HORA_FIM', 'SUPER_PONTO', 'BASE_ATRIBUIDA', 'PRIORIDADE', 'DISTANCIA_REDE_METROS', 'LATITUDE_REDE', 'LONGITUDE_REDE']:
+                for vrp_col in ['NOME_DIA', 'ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'HORA_INICIO', 'HORA_FIM', 'SUPER_PONTO', 'BASE_ATRIBUIDA', 'PRIORIDADE', 'DISTANCIA_REDE_METROS', 'POSTES PREVISTOS', 'LATITUDE_REDE', 'LONGITUDE_REDE']:
                     if vrp_col in row:
                         new_row[vrp_col] = row[vrp_col]
                 unpacked_rows.append(new_row)
@@ -600,7 +607,7 @@ def gerar_excel_bytes(df, col_prioridade, colunas_originais=None):
             elif any(x in col_name_upper for x in ['PROTOCOLO', 'MUNICIPIO', 'BASE', 'LOCALIDADE']): ws.column_dimensions[col_letter].width = 25.0
             else: ws.column_dimensions[col_letter].width = 18.0
                 
-            if col_name_upper in ['NOME_DIA', 'ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE', 'HORA_INICIO', 'HORA_FIM', 'DISTANCIA_REDE_METROS', 'LATITUDE_REDE', 'LONGITUDE_REDE']:
+            if col_name_upper in ['NOME_DIA', 'ORDEM', 'SEMANA', 'DIA', 'PERIODO', 'DISTANCIA_PONTO_ANTERIOR_KM', 'DISTANCIA_PROXIMO_PONTO_KM', 'TEMPO_VIAGEM_MINUTOS', 'PRIORIDADE', 'HORA_INICIO', 'HORA_FIM', 'DISTANCIA_REDE_METROS', 'POSTES PREVISTOS', 'LATITUDE_REDE', 'LONGITUDE_REDE']:
                 col_types[col_idx] = center_align
             else:
                 col_types[col_idx] = left_align
@@ -744,6 +751,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                         
                         dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
                         dist_rede = r.get('DISTANCIA_REDE_METROS')
+                        postes_prev = r.get('POSTES PREVISTOS')
                         
                         extra_rows_list = []
                         for c in cols_exibir:
@@ -753,6 +761,8 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                                 
                         if pd.notna(dist_rede):
                             extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>Rede Mais Próxima:</td><td style='padding:3px 6px; color:#17a2b8; font-weight:bold;'>{dist_rede:.1f} Metros</td></tr>")
+                        if pd.notna(postes_prev):
+                            extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>Postes Previstos:</td><td style='padding:3px 6px; color:#e67e22; font-weight:bold;'>{int(postes_prev)} UN</td></tr>")
 
                         extra_rows = "".join(extra_rows_list)
                         prot_html = formata_campo_html(r.get('PROTOCOLO', 'N/A'))
@@ -830,6 +840,7 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                     
                     dist_prox = r.get('DISTANCIA_PROXIMO_PONTO_KM', 0.0)
                     dist_rede = r.get('DISTANCIA_REDE_METROS')
+                    postes_prev = r.get('POSTES PREVISTOS')
                     
                     extra_rows_list = []
                     for c in cols_exibir:
@@ -839,6 +850,8 @@ def gerar_kml_agrupado(df_rota, bases_records, doc_name, cols_exibir, lista_toda
                             
                     if pd.notna(dist_rede):
                         extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>Rede Mais Próxima:</td><td style='padding:3px 6px; color:#17a2b8; font-weight:bold;'>{dist_rede:.1f} Metros</td></tr>")
+                    if pd.notna(postes_prev):
+                        extra_rows_list.append(f"<tr><td style='padding:3px 6px; font-weight:bold; color:#555;'>Postes Previstos:</td><td style='padding:3px 6px; color:#e67e22; font-weight:bold;'>{int(postes_prev)} UN</td></tr>")
 
                     extra_rows = "".join(extra_rows_list)
                     prot_html = formata_campo_html(r.get('PROTOCOLO', 'N/A'))
@@ -1332,6 +1345,7 @@ def view_roteirizador():
             # --- NOVO UPLOADER: MALHA ELÉTRICA KMZ/KML ---
             with st.container(border=True):
                 rede_files = st.file_uploader("5️⃣ Malha Elétrica de Referência (KMZ/KML) - P/ Ligar Obra à Rede", type=["kmz", "kml"], accept_multiple_files=True, key="rede_uploader")
+                vao_medio_postes = st.slider("📏 Vão entre Postes (Metros)", min_value=20, max_value=100, value=60, step=1, help="Distância padrão entre postes para calcular os postes previstos.")
                 st.caption("⚡ A IA varrerá as redes e transformadores nestes mapas e guiará o técnico no KML final ignorando outros componentes.")
 
             df_status_upload = pd.DataFrame()
@@ -1842,7 +1856,7 @@ def view_roteirizador():
                     
                 if not df_rede_kml.empty:
                     with st.spinner(f"⚡ Encontrando a rede elétrica mais próxima para as {len(df_tasks_alocadas)} obras prontas..."):
-                        df_tasks_alocadas = encontrar_rede_mais_proxima(df_tasks_alocadas, df_rede_kml)
+                        df_tasks_alocadas = encontrar_rede_mais_proxima(df_tasks_alocadas, df_rede_kml, vao_medio_postes)
                         st.success(f"✅ {len(df_rede_kml)} nós de rede mapeados! O KML vai traçar uma linha-guia visual até a rede mais próxima.")
 
             st.session_state.tarefas_alocadas_inicialmente = len(df_tasks_alocadas)
@@ -2243,10 +2257,12 @@ def view_roteirizador():
                     qtd_comum = len(df_base_real[df_base_real['PRIORIDADE'] == 'Não']) if 'PRIORIDADE' in df_base_real.columns else len(df_base_real)
                     qtd_prio = len(df_base_real[df_base_real['PRIORIDADE'] == 'Sim']) if 'PRIORIDADE' in df_base_real.columns else 0
                     qtd_super = len(df_base_real[df_base_real['SUPER_PONTO'].astype(str).str.startswith('SIM')]) if 'SUPER_PONTO' in df_base_real.columns else 0
+                    qtd_postes = int(df_base_real['POSTES PREVISTOS'].sum()) if 'POSTES PREVISTOS' in df_base_real.columns else 0
                     
                     resumo_levantadores.append({
                         'LEVANTADOR': base, 'TIPO EQUIPE': tipo_eq, 'OBRAS COMUNS': qtd_comum,
                         'OBRAS PRIORITARIAS': qtd_prio, 'SUPER PONTOS': qtd_super, 'TOTAL OBRAS': qtd_comum + qtd_prio,
+                        'POSTES PREVISTOS TOTAIS': qtd_postes,
                         'KM TOTAL PREVISTO': round(df_base['DISTANCIA_PONTO_ANTERIOR_KM'].sum(), 2)
                     })
                 df_resumo = pd.DataFrame(resumo_levantadores)
