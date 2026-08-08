@@ -184,29 +184,42 @@ def atualizar_status_via_df(df_principal, df_status, coluna_alvo):
 # 4. MÓDULOS DE PROCESSAMENTO GEOGRÁFICO E REDE
 # ==========================================
 def extrair_lon_lat_kml(kml_text):
+    """Varre o XML e extrai nós geográficos APENAS de Redes Primárias, Secundárias e Transformadores"""
     coords = []
+    
+    # Padrões que identificam Redes e Transformadores (ignora postes, chaves, caixas, etc)
     padrao_alvo = re.compile(r'prim[aá]ri|secund[aá]ri|trafo|transformador|_pri|_sec|\bpri\b|\bsec\b|\bmt\b|\bbt\b', re.IGNORECASE)
+    
+    # 1. Identificar Styles/StyleMaps que pertencem aos alvos
     target_styles = set()
+    # Busca em <Style>
     for style_id, style_content in re.findall(r'<Style\s+id="([^"]+)"(.*?</Style>)', kml_text, re.DOTALL | re.IGNORECASE):
         if padrao_alvo.search(style_id) or padrao_alvo.search(style_content):
             target_styles.add(style_id)
             
+    # Busca em <StyleMap>
     for stylemap_id, stylemap_content in re.findall(r'<StyleMap\s+id="([^"]+)"(.*?</StyleMap>)', kml_text, re.DOTALL | re.IGNORECASE):
         if padrao_alvo.search(stylemap_id) or padrao_alvo.search(stylemap_content):
             target_styles.add(stylemap_id)
 
+    # 2. Analisar cada Placemark isoladamente
     placemarks = re.findall(r'<Placemark.*?</Placemark>', kml_text, re.DOTALL | re.IGNORECASE)
     
     for pm in placemarks:
         is_target = False
+        
+        # Checa se o texto/nome do Placemark possui a palavra-chave
         if padrao_alvo.search(pm):
             is_target = True
         else:
+            # Checa se o Placemark usa um Style de Rede/Trafo
             style_urls = re.findall(r'<styleUrl>#?(.*?)</styleUrl>', pm, re.IGNORECASE)
             for url in style_urls:
                 if url in target_styles or padrao_alvo.search(url):
                     is_target = True
                     break
+                    
+        # Se for Rede Primária, Secundária ou Trafo, extrai as coordenadas
         if is_target:
             matches = re.findall(r'<coordinates>\s*(.*?)\s*</coordinates>', pm, re.DOTALL)
             for match in matches:
@@ -222,9 +235,11 @@ def extrair_lon_lat_kml(kml_text):
                         except:
                             pass
                             
+    # 3. Fallback: Se o KML agrupa por <Folder> e não usa Styles explícitos
     if not coords:
         folders_raw = re.split(r'<Folder.*?>', kml_text, flags=re.IGNORECASE)
         for f_raw in folders_raw:
+            # Olha o nome da pasta (geralmente nos primeiros 200 caracteres)
             if padrao_alvo.search(f_raw[:200]): 
                 matches = re.findall(r'<coordinates>\s*(.*?)\s*</coordinates>', f_raw, re.DOTALL)
                 for match in matches:
@@ -239,9 +254,11 @@ def extrair_lon_lat_kml(kml_text):
                                     coords.append((lon, lat))
                             except:
                                 pass
-    return list(set(coords)) 
+
+    return list(set(coords)) # Remove duplicatas para otimizar o Numpy
 
 def extrair_coordenadas_rede(uploaded_files):
+    """Lê arquivos KML/KMZ e retorna um DataFrame estruturado de nós da malha elétrica"""
     coords_list = []
     for f in uploaded_files:
         file_bytes = f.getvalue()
@@ -266,6 +283,7 @@ def extrair_coordenadas_rede(uploaded_files):
     return df_rede
 
 def encontrar_rede_mais_proxima(df_tasks, df_rede, vao_medio):
+    """Algoritmo vetorial: Encontra a distância até a rede e estipula a quantidade de postes previstos"""
     if df_rede.empty or df_tasks.empty:
         return df_tasks
     
@@ -286,11 +304,12 @@ def encontrar_rede_mais_proxima(df_tasks, df_rede, vao_medio):
             nearest_postes.append(np.nan)
             continue
             
+        # Numpy faz o Broadcast calculando a distancia de 1 obra pra toda a nuvem da rede simultaneamente
         dists = haversine_vectorized(t_lat, t_lon, rede_lats, rede_lons)
         min_idx = np.argmin(dists)
         
-        dist_metros = dists[min_idx] * 1000 
-        postes = int(dist_metros // vao_medio) 
+        dist_metros = dists[min_idx] * 1000 # De KM para Metros
+        postes = int(dist_metros // vao_medio) # Calcula a quantidade estimada de postes
         
         nearest_dists.append(dist_metros)
         nearest_postes.append(postes)
@@ -997,9 +1016,6 @@ def view_roteirizador():
             if 'SANEAMENTO' in origens and 'LEVANTAMENTO' not in origens:
                 is_saneamento_puro = True
 
-        if 'tot_obras_nao_alocadas' in st.session_state and st.session_state.tot_obras_nao_alocadas > 0:
-            st.warning(f"⚠️ **CAPACIDADE MATEMÁTICA ATINGIDA:** {st.session_state.tot_obras_nao_alocadas} obras da planilha foram ignoradas e deixadas de fora do roteamento para não estourar o limite exato que você configurou de Obras x Equipes.")
-
         c_m1, c_m2, c_m3, c_m4 = st.columns(4)
         c_m1.markdown(f'<div class="metric-card" style="border-left: 5px solid #0D256C;"><div class="metric-icon" style="background: rgba(13, 37, 108, 0.12);">🎯</div><div class="metric-content"><div class="metric-title">TOTAL DE OBRAS ROTEIRIZADAS</div><div class="metric-value">{tot_obras_reais} <span style="font-size:12px;color:#888;">(Em {tot_paradas} Pontos)</span></div></div></div>', unsafe_allow_html=True)
         c_m2.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="metric-icon" style="background: rgba(139, 92, 246, 0.15);">👥</div><div class="metric-content"><div class="metric-title">Equipes Alocadas</div><div class="metric-value">{tot_equipes}</div></div></div>', unsafe_allow_html=True)
@@ -1035,36 +1051,24 @@ def view_roteirizador():
         
         if obras_faltantes > 0:
             if obras_sobrando_na_planilha > 0:
-                dica_extra = f"<li><b>Obras Sobrando sem Equipe:</b> O sistema detectou que <b>{obras_sobrando_na_planilha} obras</b> tinham coordenadas válidas, mas ficaram de fora do roteamento. Isso quase sempre significa que as equipes não têm permissão para atuar na cidade dessas obras (verifique a Regra no Passo 1).</li>"
+                dica_extra = f"<li><b>Falta de Obras nos Municípios Atendidos:</b> O sistema detectou que sobraram <b>{obras_sobrando_na_planilha} obras</b> na planilha, mas elas pertencem a cidades que os seus levantadores atuais não atendem. A meta de {meta_global_exata} não foi atingida porque o estoque de obras nas cidades específicas de cada técnico esgotou. O sistema roteirizou o máximo possível ({tot_obras_reais} obras) com base na disponibilidade real das cidades.</li>"
             else:
-                dica_extra = "<li><b>Falta de Obras na Planilha:</b> Após o sistema limpar automaticamente as obras sem coordenadas, com status inválido, sem nome ou que <i>já possuíam data de despacho preenchida</i>, o seu banco de dados simplesmente esgotou antes de conseguir bater a meta operacional de todos os técnicos.</li>"
+                dica_extra = f"<li><b>Falta de Obras na Planilha Geral:</b> O estoque total de obras válidas esgotou antes de fechar a meta operacional. Faltaram obras nos municípios de atuação. O sistema roteirizou a quantidade máxima encontrada ({tot_obras_reais} obras).</li>"
             
             st.markdown(f'''
             <div style="background-color: #fff3cd; color: #856404; padding: 20px; border-left: 6px solid #ffeeba; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                <h3 style="margin-top: 0; color: #856404; display: flex; align-items: center;"><span style="font-size: 24px; margin-right: 10px;">⚠️</span> Quadro de Aviso: Meta de Obras Não Atingida</h3>
+                <h3 style="margin-top: 0; color: #856404; display: flex; align-items: center;"><span style="font-size: 24px; margin-right: 10px;">⚠️</span> Quadro de Aviso: Quantidade de Obras Limitada pelo Estoque</h3>
                 <p style="font-size: 16px;">Você configurou o sistema para roteirizar <b>{meta_global_exata} obras</b> no total <i>({obras_dia_meta} obras/dia × {dias_multiplicador * limite_periodos_meta} dias × {tot_equipes_cadastradas} equipes)</i>.</p>
-                <p style="font-size: 16px;">O algoritmo conseguiu alocar apenas <b>{tot_obras_reais} obras</b> prontas para a rua. <br>
-                <span style="color: #d9534f; font-weight: bold; font-size: 18px;">❌ Faltaram {obras_faltantes} obras para atingir a quantidade desejada.</span></p>
+                <p style="font-size: 16px;">No entanto, <b>não havia obras suficientes nos municípios que cada levantador atende</b>. O algoritmo roteirizou a quantidade máxima encontrada e compatível: <b>{tot_obras_reais} obras</b>. <br>
+                <span style="color: #d9534f; font-weight: bold; font-size: 18px;">❌ Faltaram {obras_faltantes} obras para atingir a meta escolhida.</span></p>
                 <hr style="border-top: 1px solid #ffeeba; margin: 15px 0;">
-                <h4 style="margin-bottom: 10px; color: #856404;">🔍 Por que isso aconteceu e como corrigir?</h4>
+                <h4 style="margin-bottom: 10px; color: #856404;">🔍 Resumo do Cenário:</h4>
                 <ul style="font-size: 14px; line-height: 1.6;">
                     {dica_extra}
-                    <li><b>Regra Geográfica Restritiva (DICA DE OURO):</b> Se no <b>Passo 1</b> você escolheu a regra <i>"Por Municípios Atendidos"</i>, o sistema é rigoroso e só manda o técnico para as cidades exatas escritas na planilha. Para forçar o preenchimento da meta, troque a regra para <b>"Por Proximidade Geográfica (Ignora texto)"</b> e rode novamente. Assim, a IA vai puxar as obras mais próximas no raio que for necessário até a cota de todo mundo ficar cheia.</li>
-                    <li><b>Obras Agrupadas (Super Pontos):</b> Se várias obras ficavam exatamente na mesma coordenada, a IA unificou tudo num "Super Ponto". Isso diminui a contagem visual de pontos no mapa, embora as tarefas originais ainda estejam lá dentro.</li>
+                    <li>Verifique a aba <b>"Relatório de Déficit por Levantador"</b> abaixo para ver exatamente quantos e quais técnicos ficaram ociosos e em quais cidades você precisa adicionar mais notas no Excel.</li>
                 </ul>
             </div>
             ''', unsafe_allow_html=True)
-            
-            if equipes_abaixo_meta:
-                detalhes_html = "".join([f"<li style='margin-bottom: 4px;'><b>{eq}</b>: Roteirizou {qtd} obras (Faltaram {meta_exata_por_equipe - qtd}).</li>" for eq, qtd in equipes_abaixo_meta.items()])
-                st.markdown(f'''
-                    <details style="margin-bottom: 20px;">
-                        <summary style="cursor: pointer; font-weight: bold; padding: 8px; background: rgba(0,0,0,0.05); border-radius: 4px;">Ver Equipes que ficaram com falta de obras no cronograma ({len(equipes_abaixo_meta)} equipes)</summary>
-                        <ul style="margin-top: 10px; color: #b91c1c;">
-                            {detalhes_html}
-                        </ul>
-                    </details>
-                ''', unsafe_allow_html=True)
                 
         else:
             st.markdown(f'''
@@ -1194,7 +1198,7 @@ def view_roteirizador():
         st_folium(mapa, use_container_width=True, height=550, returned_objects=[])
 
         st.markdown("<br>", unsafe_allow_html=True)
-        tab_dados, tab_gantt = st.tabs(["📊 Dados Tabulares", "⏱️ Timeline Interativa (Gantt)"])
+        tab_dados, tab_relatorio = st.tabs(["📊 Dados Tabulares", "📉 Relatório de Déficit por Levantador"])
 
         with tab_dados:
             st.markdown("#### Detalhamento de Rotas")
@@ -1209,43 +1213,50 @@ def view_roteirizador():
                 }
             )
 
-        with tab_gantt:
-            st.markdown("#### Linha do Tempo das Equipes")
-            df_gantt = df_routed.copy()
+        with tab_relatorio:
+            st.markdown("#### Análise de Ociosidade e Falta de Obras por Técnico")
             
-            def label_tarefa(row):
-                if row['PROTOCOLO'] == 'RETORNO_BASE': return 'Deslocamento/Retorno'
-                if row['PROTOCOLO'] == 'PAUSA_ALMOCO': return 'Pausa para Almoço'
-                prio = "🚨 " if row.get('PRIORIDADE') == 'Sim' else ""
-                return f"{prio}Obra Operacional"
+            dados_relatorio = []
+            for b_record in st.session_state.bases_records:
+                nome_lev = b_record['LEVANTADOR']
+                muns_atendidos = str(b_record.get('MUNICIPIO', b_record.get('RESIDENCIA', 'DESCONHECIDO')))
                 
-            df_gantt['TAREFA'] = df_gantt.apply(label_tarefa, axis=1)
-            
-            df_gantt['START_PLOT'] = pd.to_datetime(df_gantt['_HORA_INICIO_DT'])
-            df_gantt['END_PLOT'] = pd.to_datetime(df_gantt['_HORA_FIM_DT'])
-            
-            mask_retorno = df_gantt['PROTOCOLO'] == 'RETORNO_BASE'
-            df_gantt.loc[mask_retorno, 'END_PLOT'] = df_gantt.loc[mask_retorno, 'END_PLOT'] + pd.Timedelta(minutes=5)
-            
-            periodos_disp = sorted(df_gantt['PERIODO'].unique())
-            if periodos_disp:
-                p_sel = st.selectbox("Selecione o Período:", periodos_disp)
-                df_plot = df_gantt[df_gantt['PERIODO'] == p_sel]
+                qtd_roteirizada = obras_por_equipe.get(nome_lev, 0)
+                deficit = meta_exata_por_equipe - qtd_roteirizada
                 
-                fig = px.timeline(
-                    df_plot, 
-                    x_start="START_PLOT", x_end="END_PLOT", y="BASE_ATRIBUIDA", color="TAREFA",
-                    hover_name="PROTOCOLO",
-                    color_discrete_map={'Deslocamento/Retorno': '#6c757d', 'Pausa para Almoço': '#f39c12', 'Obra Operacional': '#0D256C', '🚨 Obra Operacional': '#e74c3c'},
-                    height=300 + (len(df_plot['BASE_ATRIBUIDA'].unique()) * 30)
-                )
-                fig.update_yaxes(autorange="reversed", title="")
-                fig.layout.xaxis.tickformat = '%H:%M'
-                fig.update_layout(
-                    xaxis_title="Horário do Dia", 
-                    margin=dict(l=0, r=0, t=30, b=0)
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                status_meta = "✅ Meta Atingida" if deficit <= 0 else "❌ Faltam Obras"
+                
+                dados_relatorio.append({
+                    "Levantador": nome_lev,
+                    "Municípios de Atuação": muns_atendidos,
+                    "Meta (Obras)": meta_exata_por_equipe,
+                    "Roteirizadas": qtd_roteirizada,
+                    "Faltantes (Déficit)": deficit if deficit > 0 else 0,
+                    "Status": status_meta
+                })
+            
+            df_relatorio = pd.DataFrame(dados_relatorio)
+            df_relatorio = df_relatorio.sort_values(by="Faltantes (Déficit)", ascending=False).reset_index(drop=True)
+            
+            st.info("Abaixo estão os levantadores que não atingiram a quantidade de obras solicitada porque o estoque de notas da sua cidade de atuação esgotou na planilha.")
+            
+            st.dataframe(
+                df_relatorio,
+                use_container_width=True,
+                column_config={
+                    "Faltantes (Déficit)": st.column_config.NumberColumn(
+                        "Faltantes (Déficit)",
+                        help="Quantas obras faltaram para bater a meta deste técnico.",
+                        format="%d ⚠️"
+                    ),
+                    "Roteirizadas": st.column_config.ProgressColumn(
+                        "Obras Roteirizadas",
+                        format="%d",
+                        min_value=0,
+                        max_value=int(meta_exata_por_equipe)
+                    )
+                }
+            )
 
         # Atualizando o card verde do menu lateral (MESMO NO ESTADO CONCLUÍDO)
         sidebar_html_placeholder.markdown(renderizar_painel_lateral(meta_exata_por_equipe, tot_obras_reais, tot_equipes_cadastradas, meta_global_exata), unsafe_allow_html=True)
@@ -1364,7 +1375,7 @@ def view_roteirizador():
                         if levs_temp_selecionados:
                             df_bases_temp = df_bases_temp_full[df_bases_temp_full['LEVANTADOR'].isin(levs_temp_selecionados)].copy()
                             
-                            if 'LATITUDE' in df_bases_temp.columns and 'LONGITUDE' in df_bases_temp.columns:
+                            if 'LATITUDE' in df_bases.columns and 'LONGITUDE' in df_bases_temp.columns:
                                 df_bases_temp['LATITUDE'] = pd.to_numeric(df_bases_temp['LATITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
                                 df_bases_temp['LONGITUDE'] = pd.to_numeric(df_bases_temp['LONGITUDE'].astype(str).str.replace(',', '.'), errors='coerce')
                             elif 'RESIDENCIA' in df_bases_temp.columns or 'MUNICIPIO' in df_bases_temp.columns:
@@ -2019,7 +2030,7 @@ def view_roteirizador():
                             'lat': base_lat, 'lon': base_lon,
                             'time': data_base_inicio + pd.Timedelta(days=dia_abs - 1),
                             'obras_hoje': 0,
-                            'prio_hoje': 0, # <-- Monitora as prioridades do dia
+                            'prio_hoje': 0, 
                             'km_hoje': 0.0,
                             'lunch': False
                         }
@@ -2062,15 +2073,12 @@ def view_roteirizador():
                         
                         virar_dia = False
                         
-                        # --- LÓGICA DE LIMITE ELÁSTICO PARA PRIORIDADES ---
                         prio_acumulada = estado.get('prio_hoje', 0) + qtd_prio_atual
                         limite_diario_atual = cfg['obras_por_dia']
                         
-                        # Se as notas prioritárias no dia atual excederem 3, agrupamos mais obras
                         if prio_acumulada > 3:
-                            limite_diario_atual += 10 # Bônus de tolerância de +10 obras (ajustável)
+                            limite_diario_atual += 10 
                         
-                        # 🔴 SE O DIA ENCHEU, OU SE A CIDADE MUDOU NO MEIO DO EXPEDIENTE: QUEBRA!
                         if obras_no_periodo_macro >= limite_diario_atual:
                             virar_dia = True
                         elif mun_anterior is not None and mun_atual != mun_anterior and estado['obras_hoje'] > 0:
@@ -2100,7 +2108,7 @@ def view_roteirizador():
                                     dia_da_semana = 1
                                     
                             estado = iniciar_dia(dia_absoluto)
-                            prio_acumulada = qtd_prio_atual # Reseta a contagem para o novo dia
+                            prio_acumulada = qtd_prio_atual 
                             
                             viagem_km = haversine_vectorized(estado['lat'], estado['lon'], obra['LATITUDE'], obra['LONGITUDE'])
                             if viagem_km < 0.05 and estado['obras_hoje'] > 0:
@@ -2125,7 +2133,7 @@ def view_roteirizador():
                         estado['lon'] = obra['LONGITUDE']
                         estado['time'] = fim_previsto
                         estado['obras_hoje'] += qtd_real
-                        estado['prio_hoje'] = prio_acumulada # Atualiza as prioridades do dia
+                        estado['prio_hoje'] = prio_acumulada 
                         estado['km_hoje'] += viagem_km
                         obras_no_periodo_macro += qtd_real
                         
